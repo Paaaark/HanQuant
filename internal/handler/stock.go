@@ -1,0 +1,70 @@
+package handler
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/Paaaark/hanquant/internal/service"
+)
+
+type StockHandler struct {
+    svc *service.StockService
+}
+
+func NewStockHandler(svc *service.StockService) *StockHandler {
+    return &StockHandler{svc: svc}
+}
+
+func (h *StockHandler) SearchStocks(w http.ResponseWriter, r *http.Request) {
+    query := r.URL.Query().Get("q")
+    result := h.svc.SearchStocks(query)
+    json.NewEncoder(w).Encode(result)
+}
+
+func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+	}
+
+    symbol := parts[3]
+
+    result, err := h.svc.GetRecentPrice(symbol)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    json.NewEncoder(w).Encode(result)
+}
+
+func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request) {
+    // Split the path to extract symbol
+    path := r.URL.Path
+    parts := strings.Split(path, "/")
+    if len(parts) < 4 {
+        http.Error(w, "missing stock symbol in path", http.StatusBadRequest)
+        return
+    }
+    symbol := parts[3]
+
+    from := r.URL.Query().Get("from")
+    to := r.URL.Query().Get("to")
+    duration := r.URL.Query().Get("duration")
+
+    if symbol == "" || from == "" || to == "" || duration == "" {
+        http.Error(w, "missing query parameters", http.StatusBadRequest)
+        return
+    }
+
+    result, err := h.svc.GetHistoricalPrice(symbol, from, to, duration)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(result)
+}
+
