@@ -26,4 +26,8 @@ func main() {
 
     fmt.Println("✅ Daily price response:")
     fmt.Println(body)
+
+    stockListings, err := data.Load("stock_listings.csv")
+    searched := stockListings.SearchStocks("삼성")
+    fmt.Println(searched)
 }
