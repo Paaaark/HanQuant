@@ -76,6 +76,7 @@ func WriteToCSV(stocks []StockIdentity, outPath string) error {
     return nil
 }
 
+// SearchStocks returns all stocks that *contain* the query in code or name
 func (s *StockStore) SearchStocks(query string) []StockIdentity {
 	query = strings.ToLower(query)
 	var results []StockIdentity
@@ -88,6 +89,16 @@ func (s *StockStore) SearchStocks(query string) []StockIdentity {
 	}
 
 	return results
+}
+
+// FindStockByCode returns the exact stock that *matches* the code
+func (s *StockStore) FindStockByCode(code string) (*StockIdentity, bool) {
+	for _, stock := range s.Cache {
+		if strings.EqualFold(stock.Code, code) {
+			return &stock, true
+		}
+	}
+	return nil, false
 }
 
 func Load(path string) (*StockStore, error) {

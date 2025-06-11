@@ -11,16 +11,10 @@ import (
 	"strconv"
 )
 
-type KISClient struct {
-    AppKey     string
-    AppSecret  string
-    AccessToken string
-    TrID       string
-}
-
 const (
     // Real URL should be "https://openapi.koreainvestment.com:9443"
-    KISBaseURL = "https://openapivts.koreainvestment.com:29443"
+    KISBaseURL = "https://openapi.koreainvestment.com:9443"
+    KISBaseURLMock = "https://openapivts.koreainvestment.com:29443"
     KIS_ACCESS_TOKEN = "KIS_ACCESS_TOKEN"
 )
 
@@ -28,6 +22,8 @@ func NewKISClient() *KISClient {
     return &KISClient{
         AppKey: os.Getenv("KIS_APP_KEY"),
         AppSecret: os.Getenv("KIS_APP_SECRET"),
+        MockAppKey: os.Getenv("KIS_MOCK_APP_KEY"),
+        MockAppSecret: os.Getenv("KIS_MOCK_APP_SECRET"),
     }
 }
 
@@ -84,29 +80,17 @@ func (c *KISClient) GetRecentDailyPrice(symbol string) ([]PriceStruct, error) {
     params.Add("FID_PERIOD_DIV_CODE", "D")
     params.Add("FID_ORG_ADJ_PRC", "0")
 
-    req, err := http.NewRequest("GET", endpoint+"?"+params.Encode(), nil)
+    resp_body, err := c.get(endpoint, "FHKST01010400", params)
     if err != nil {
         return nil, err
     }
+    defer resp_body.Close()
 
-    c.prepareRequestHeader(req, "FHKST01010400")
-
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
-
-    fmt.Println(resp.Request.URL)
-
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("API request failed: %s", resp.Status)
-    }
-
-    return parsePriceBody(resp.Body, "output", "D")
+    return parsePriceBody(resp_body, "output", "D")
 }
 
-// GetDailyPrice retrieves historical stock prices for a given symbol between two dates.
+// GetDailyPrice: 국내주식기간별시세(일/주/월/년)
+// Retrieves historical stock prices for a given symbol between two dates.
 // It calls the "국내주식기간별시세(일/주/월/년)" API and returns a slice of PriceStruct.
 //
 // Parameters:
@@ -130,25 +114,32 @@ func (c *KISClient) GetDailyPrice(symbol, from, to, duration string) ([]PriceStr
 	params.Add("FID_INPUT_DATE_2", to)
 	params.Add("FID_PERIOD_DIV_CODE", duration)
 	params.Add("FID_ORG_ADJ_PRC", "0")
-    req, err := http.NewRequest("GET", endpoint+"?"+params.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
 
-	c.prepareRequestHeader(req, "FHKST03010100")
+    resp_body, err := c.get(endpoint, "FHKST03010100", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API call error: %w", err)
-	}
-	defer resp.Body.Close()
+    // req, err := http.NewRequest("GET", endpoint+"?"+params.Encode(), nil)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to create request: %w", err)
+	// }
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API call failed: %s\n%s", resp.Status, string(body))
-	}
+	// c.prepareRequestHeader(req, "FHKST03010100")
 
-	return parsePriceBody(resp.Body, "output2", duration)
+	// resp, err := http.DefaultClient.Do(req)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("API call error: %w", err)
+	// }
+	// defer resp.Body.Close()
+
+	// if resp.StatusCode != http.StatusOK {
+	// 	body, _ := io.ReadAll(resp.Body)
+	// 	return nil, fmt.Errorf("API call failed: %s\n%s", resp.Status, string(body))
+	// }
+
+	return parsePriceBody(resp_body, "output2", duration)
 }
 
 // prepareRequestHeaders sets the standard headers required for KIS API requests.
@@ -165,6 +156,46 @@ func (c *KISClient) prepareRequestHeader(req *http.Request, trID string) {
 	req.Header.Set("appkey", c.AppKey)
 	req.Header.Set("appsecret", c.AppSecret)
 	req.Header.Set("tr_id", trID)
+}
+
+// GetTopFluctuationStocks: 국내주식 등락률 순위
+// Fetches the top 30 ranked stocks by price fluctuation (e.g. 상승률 순)
+func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/ranking/fluctuation", KISBaseURL)
+
+    c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+    params.Add("fid_rsfl_rate2", "")
+    params.Add("fid_cond_mrkt_div_code", "J")
+    params.Add("fid_cond_scr_div_code", "20170")
+    params.Add("fid_input_iscd", "0000")
+    params.Add("fid_rank_sort_cls_code", "0") // 상승율 순
+    params.Add("fid_input_cnt_1", "0")
+    params.Add("fid_prc_cls_code", "0")
+    params.Add("fid_input_price_1", "")
+    params.Add("fid_input_price_2", "")
+    params.Add("fid_vol_cnt", "")
+    params.Add("fid_trgt_cls_code", "0")
+    params.Add("fid_trgt_exls_cls_code", "0")
+    params.Add("fid_div_cls_code", "0")
+    params.Add("fid_rsfl_rate1", "")
+
+    resp_body, err := c.get(endpoint, "FHPST01700000", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
+
+	var result struct {
+		Output []RankingStock `json:"output"`
+	}
+
+	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	return result.Output, nil
 }
 
 // parsePriceBody parses a KIS API HTTP response body into a slice of PriceStruct.
@@ -214,4 +245,29 @@ func parsePriceBody(body io.Reader, targetField, duration string) ([]PriceStruct
 		})
 	}
     return prices, nil
+}
+
+// get sends a GET request to the given KIS API endpoint with headers and query parameters,
+// and returns the raw response body if the status is 200 OK. Otherwise, it returns an error.
+//
+// ⚠️ Caller MUST close the returned body to avoid resource leaks.
+func (c *KISClient) get(endpoint, trID string, params url.Values) (io.ReadCloser, error) {
+	req, err := http.NewRequest("GET", endpoint+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	c.prepareRequestHeader(req, trID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("KIS error: %s\n%s", resp.Status, string(b))
+	}
+
+	return resp.Body, nil
 }

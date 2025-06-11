@@ -28,6 +28,12 @@ func main() {
     fmt.Println(body)
 
     stockListings, err := data.Load("stock_listings.csv")
-    searched := stockListings.SearchStocks("삼성")
+    searched := stockListings.SearchStocks("삼성전자")
     fmt.Println(searched)
+
+    top_stocks, err := client.GetTopFluctuationStocks()
+    if err != nil {
+        fmt.Println(err)
+    }
+    fmt.Println(top_stocks)
 }
