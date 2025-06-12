@@ -32,3 +32,7 @@ func (s *StockService) GetRecentPrice(symbol string) ([]data.PriceStruct, error)
 func (s *StockService) GetHistoricalPrice(symbol, from, to, duration string) ([]data.PriceStruct, error) {
     return s.kis.GetDailyPrice(symbol, from, to, duration)
 }
+
+func (s *StockService) GetTopFluctuationStocks() ([]data.RankingStock, error) {
+	return s.kis.GetTopFluctuationStocks()
+}

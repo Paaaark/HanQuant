@@ -68,3 +68,13 @@ func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request
     json.NewEncoder(w).Encode(result)
 }
 
+func (h *StockHandler) GetTopFluctuationStocks(w http.ResponseWriter, r *http.Request) {
+    result, err := h.svc.GetTopFluctuationStocks()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(result)
+}

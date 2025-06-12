@@ -27,47 +27,6 @@ func NewKISClient() *KISClient {
     }
 }
 
-func (c *KISClient) GetKISAccessToken() (string, error) {
-    payload := map[string]string{
-        "grant_type": "client_credentials",
-        "appkey":     c.AppKey,
-        "appsecret":  c.AppSecret,
-    }
-
-    body, err := json.Marshal(payload)
-    if err != nil {
-        return "", fmt.Errorf("failed to encode JSON: %w", err)
-    }
-
-    req, err := http.NewRequest("POST", KISBaseURL+"/oauth2/tokenP", bytes.NewBuffer(body))
-    if err != nil {
-        return "", fmt.Errorf("failed to create request: %w", err)
-    }
-
-    req.Header.Set("Content-Type", "application/json; charset=UTF-8")
-
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return "", fmt.Errorf("request error: %w", err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK {
-        responseBody, _ := io.ReadAll(resp.Body)
-        return "", fmt.Errorf("unexpected status %s: %s", resp.Status, responseBody)
-    }
-
-    var authResp struct {
-        AccessToken string `json:"access_token"`
-    }
-    if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-        return "", fmt.Errorf("failed to parse response: %w", err)
-    }
-
-    c.AccessToken = authResp.AccessToken
-    return authResp.AccessToken, nil
-}
-
 // GetRecentDailyPrice: 주식현재가 일자별
 func (c *KISClient) GetRecentDailyPrice(symbol string) ([]PriceStruct, error) {
     endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-daily-price", KISBaseURL)
@@ -121,41 +80,7 @@ func (c *KISClient) GetDailyPrice(symbol, from, to, duration string) ([]PriceStr
     }
     defer resp_body.Close()
 
-    // req, err := http.NewRequest("GET", endpoint+"?"+params.Encode(), nil)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to create request: %w", err)
-	// }
-
-	// c.prepareRequestHeader(req, "FHKST03010100")
-
-	// resp, err := http.DefaultClient.Do(req)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("API call error: %w", err)
-	// }
-	// defer resp.Body.Close()
-
-	// if resp.StatusCode != http.StatusOK {
-	// 	body, _ := io.ReadAll(resp.Body)
-	// 	return nil, fmt.Errorf("API call failed: %s\n%s", resp.Status, string(body))
-	// }
-
 	return parsePriceBody(resp_body, "output2", duration)
-}
-
-// prepareRequestHeaders sets the standard headers required for KIS API requests.
-//
-// It adds headers for content type, authorization, app key, app secret, and transaction ID (tr_id).
-// This helps avoid duplication across different API calls that require similar headers.
-//
-// Parameters:
-//   - req: the HTTP request to which the headers will be applied
-//   - trID: the transaction ID specific to the API endpoint being called (e.g., "FHKST03010100")
-func (c *KISClient) prepareRequestHeader(req *http.Request, trID string) {
-    req.Header.Set("content-type", "application/json; charset=utf-8")
-	req.Header.Set("authorization", "Bearer "+c.AccessToken)
-	req.Header.Set("appkey", c.AppKey)
-	req.Header.Set("appsecret", c.AppSecret)
-	req.Header.Set("tr_id", trID)
 }
 
 // GetTopFluctuationStocks: 국내주식 등락률 순위
@@ -196,6 +121,22 @@ func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
 	}
 
 	return result.Output, nil
+}
+
+// prepareRequestHeaders sets the standard headers required for KIS API requests.
+//
+// It adds headers for content type, authorization, app key, app secret, and transaction ID (tr_id).
+// This helps avoid duplication across different API calls that require similar headers.
+//
+// Parameters:
+//   - req: the HTTP request to which the headers will be applied
+//   - trID: the transaction ID specific to the API endpoint being called (e.g., "FHKST03010100")
+func (c *KISClient) prepareRequestHeader(req *http.Request, trID string) {
+    req.Header.Set("content-type", "application/json; charset=utf-8")
+	req.Header.Set("authorization", "Bearer "+c.AccessToken)
+	req.Header.Set("appkey", c.AppKey)
+	req.Header.Set("appsecret", c.AppSecret)
+	req.Header.Set("tr_id", trID)
 }
 
 // parsePriceBody parses a KIS API HTTP response body into a slice of PriceStruct.
@@ -270,4 +211,45 @@ func (c *KISClient) get(endpoint, trID string, params url.Values) (io.ReadCloser
 	}
 
 	return resp.Body, nil
+}
+
+func (c *KISClient) GetKISAccessToken() (string, error) {
+    payload := map[string]string{
+        "grant_type": "client_credentials",
+        "appkey":     c.AppKey,
+        "appsecret":  c.AppSecret,
+    }
+
+    body, err := json.Marshal(payload)
+    if err != nil {
+        return "", fmt.Errorf("failed to encode JSON: %w", err)
+    }
+
+    req, err := http.NewRequest("POST", KISBaseURL+"/oauth2/tokenP", bytes.NewBuffer(body))
+    if err != nil {
+        return "", fmt.Errorf("failed to create request: %w", err)
+    }
+
+    req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("request error: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        responseBody, _ := io.ReadAll(resp.Body)
+        return "", fmt.Errorf("unexpected status %s: %s", resp.Status, responseBody)
+    }
+
+    var authResp struct {
+        AccessToken string `json:"access_token"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+        return "", fmt.Errorf("failed to parse response: %w", err)
+    }
+
+    c.AccessToken = authResp.AccessToken
+    return authResp.AccessToken, nil
 }
