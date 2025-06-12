@@ -36,4 +36,10 @@ func main() {
         fmt.Println(err)
     }
     fmt.Println(top_stocks)
+
+    index, err := client.GetIndexPrice("0001")
+    if err != nil {
+        fmt.Println(err)
+    }
+    fmt.Println(index)
 }

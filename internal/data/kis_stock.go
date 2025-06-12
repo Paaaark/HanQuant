@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 )
 
 const (
@@ -121,6 +122,40 @@ func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
 	}
 
 	return result.Output, nil
+}
+
+// GetIndexPrice: 국내업종 현재지수
+// Fetches index price of the targetIndex (0001: Kospi, 1001: Kosdaq, 2001: Kospi200, 4001: KRX100, and more)
+func (c *KISClient) GetIndexPrice(targetIndex string) (*IndexStruct, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-index-price", KISBaseURL)
+
+    c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+    params.Add("FID_COND_MRKT_DIV_CODE", "U")
+    params.Add("FID_INPUT_ISCD", targetIndex)
+
+    resp_body, err := c.get(endpoint, "FHPUP02100000", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
+
+    // body, err := io.ReadAll(resp_body)
+    // fmt.Println(string(body))
+
+	var result struct {
+		Output IndexStruct `json:"output"`
+	}
+
+	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+    result.Output.Date = time.Now().Format("20060102")
+    result.Output.IndexCode = targetIndex
+
+	return &result.Output, nil
 }
 
 // prepareRequestHeaders sets the standard headers required for KIS API requests.
