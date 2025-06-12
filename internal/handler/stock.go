@@ -78,3 +78,22 @@ func (h *StockHandler) GetTopFluctuationStocks(w http.ResponseWriter, r *http.Re
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(result)
 }
+
+func (h *StockHandler) GetIndexPrice(w http.ResponseWriter, r *http.Request) {
+    path := r.URL.Path
+    parts := strings.Split(path, "/")
+    if len(parts) < 3 || parts[2] == "" {
+        http.Error(w, "missing index code in path", http.StatusBadRequest)
+        return
+    }
+
+    code := parts[2]
+    result, err := h.svc.GetIndexPrice(code)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(result)
+}
