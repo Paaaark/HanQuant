@@ -9,17 +9,6 @@ import (
 	"strings"
 )
 
-type StockIdentity struct {
-    Code         string // 단축코드
-    ISIN         string // 표준코드
-    Name         string // 종목명
-    SecurityType string // 증권그룹구분코드
-}
-
-type StockStore struct {
-	Cache []StockIdentity
-}
-
 // ParseStockListingFile reads a fixed-width encoded text file line-by-line and extracts stock identities.
 func ParseStockListingFile(filePath string) ([]StockIdentity, error) {
     file, err := os.Open(filePath)

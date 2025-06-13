@@ -19,6 +19,7 @@ func NewStockHandler(svc *service.StockService) *StockHandler {
 func (h *StockHandler) SearchStocks(w http.ResponseWriter, r *http.Request) {
     query := r.URL.Query().Get("q")
     result := h.svc.SearchStocks(query)
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
     json.NewEncoder(w).Encode(result)
 }
 
@@ -36,7 +37,8 @@ func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-    json.NewEncoder(w).Encode(result)
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
 }
 
 func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +67,7 @@ func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request
     }
 
     w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(result)
+    w.Write(result.EncodeJSON())
 }
 
 func (h *StockHandler) GetTopFluctuationStocks(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +77,30 @@ func (h *StockHandler) GetTopFluctuationStocks(w http.ResponseWriter, r *http.Re
         return
     }
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(result)
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
+}
+
+func (h *StockHandler) GetMostTradedStocks(w http.ResponseWriter, r *http.Request) {
+    result, err := h.svc.GetMostTradedStocks()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
+}
+
+func (h *StockHandler) GetTopMarketCapStocks(w http.ResponseWriter, r *http.Request) {
+    result, err := h.svc.GetTopMarketCapStocks()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
 }
 
 func (h *StockHandler) GetIndexPrice(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +118,6 @@ func (h *StockHandler) GetIndexPrice(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(result)
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
 }

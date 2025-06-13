@@ -17,6 +17,8 @@ func NewHTTPServer() http.Handler {
     mux.HandleFunc("/prices/recent/", h.GetRecentPrice)
     mux.HandleFunc("/prices/historical/", h.GetHistoricalPrice)
     mux.HandleFunc("/ranking/fluctuation", h.GetTopFluctuationStocks)
+    mux.HandleFunc("/ranking/volume", h.GetMostTradedStocks)
+    mux.HandleFunc("/ranking/market-cap", h.GetTopMarketCapStocks)
     mux.HandleFunc("/index/", h.GetIndexPrice)
 
     return mux

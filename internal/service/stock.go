@@ -25,16 +25,24 @@ func (s *StockService) SearchStocks(query string) []data.StockIdentity {
     return s.store.SearchStocks(query)
 }
 
-func (s *StockService) GetRecentPrice(symbol string) ([]data.PriceStruct, error) {
+func (s *StockService) GetRecentPrice(symbol string) (data.SlicePriceStruct, error) {
     return s.kis.GetRecentDailyPrice(symbol)
 }
 
-func (s *StockService) GetHistoricalPrice(symbol, from, to, duration string) ([]data.PriceStruct, error) {
+func (s *StockService) GetHistoricalPrice(symbol, from, to, duration string) (data.SlicePriceStruct, error) {
     return s.kis.GetDailyPrice(symbol, from, to, duration)
 }
 
-func (s *StockService) GetTopFluctuationStocks() ([]data.RankingStock, error) {
+func (s *StockService) GetTopFluctuationStocks() (data.SliceRankingStock, error) {
 	return s.kis.GetTopFluctuationStocks()
+}
+
+func (s *StockService) GetMostTradedStocks() (data.SliceRankingStock, error) {
+	return s.kis.GetMostTradedStocks()
+}
+
+func (s *StockService) GetTopMarketCapStocks() (data.SliceRankingStock, error) {
+	return s.kis.GetTopMarketCapStocks()
 }
 
 func (s *StockService) GetIndexPrice(code string) (*data.IndexStruct, error) {

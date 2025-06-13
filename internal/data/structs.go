@@ -1,5 +1,16 @@
 package data
 
+type StockIdentity struct {
+	Code         string // 단축코드
+	ISIN         string // 표준코드
+	Name         string // 종목명
+	SecurityType string // 증권그룹구분코드
+}
+
+type StockStore struct {
+	Cache []StockIdentity
+}
+
 type KISClient struct {
 	AppKey        string
 	AppSecret     string
@@ -11,24 +22,30 @@ type KISClient struct {
 
 type RankingStock struct {
 	Code       string `json:"stck_shrn_iscd"`
+	Code2      string `json:"mksc_shrn_iscd"`
 	Name       string `json:"hts_kor_isnm"`
 	Price      string `json:"stck_prpr"`
 	Change     string `json:"prdy_vrss"`
 	ChangeSign string `json:"prdy_vrss_sign"`
 	ChangeRate string `json:"prdy_ctrt"`
 	Volume     string `json:"acml_vol"`
+	MarketCap  string `json:"stck_avls"`
 	Rank       string `json:"data_rank"`
 }
 
+type SliceRankingStock []RankingStock
+
 type PriceStruct struct {
-	Date     string
-	Open     float64
-	High     float64
-	Low      float64
-	Close    float64
-	Volume   int
+	Date     string `json:"stck_bsop_date"`
+	Open     string `json:"stck_oprc"`
+	High     string `json:"stck_hgpr"`
+	Low      string `json:"stck_lwpr"`
+	Close    string `json:"stck_clpr"`
+	Volume   string `json:"acml_vol"`
 	Duration string
 }
+
+type SlicePriceStruct []PriceStruct
 
 type IndexStruct struct {
 	IndexCode string

@@ -9,6 +9,6 @@ import (
 
 func main() {
     srv := server.NewHTTPServer()
-    log.Println("Server started at :8080")
-    log.Fatal(http.ListenAndServe(":8080", srv))
+    log.Println("Server started at :8081")
+    log.Fatal(http.ListenAndServe(":8081", srv))
 }

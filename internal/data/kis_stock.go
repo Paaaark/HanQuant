@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -18,6 +17,12 @@ const (
     KISBaseURLMock = "https://openapivts.koreainvestment.com:29443"
     KIS_ACCESS_TOKEN = "KIS_ACCESS_TOKEN"
 )
+var indexCodeToName = map[string]string{
+    "0001": "Kospi",
+    "1001": "Kosdaq",
+    "2001": "Kospi200",
+    "4001": "KRX100",
+}
 
 func NewKISClient() *KISClient {
     return &KISClient{
@@ -29,7 +34,7 @@ func NewKISClient() *KISClient {
 }
 
 // GetRecentDailyPrice: 주식현재가 일자별
-func (c *KISClient) GetRecentDailyPrice(symbol string) ([]PriceStruct, error) {
+func (c *KISClient) GetRecentDailyPrice(symbol string) (SlicePriceStruct, error) {
     endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-daily-price", KISBaseURL)
 
     c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
@@ -46,7 +51,19 @@ func (c *KISClient) GetRecentDailyPrice(symbol string) ([]PriceStruct, error) {
     }
     defer resp_body.Close()
 
-    return parsePriceBody(resp_body, "output", "D")
+    var raw struct {
+        Output SlicePriceStruct `json:"output"`
+    }
+
+    if err := json.NewDecoder(resp_body).Decode(&raw); err != nil {
+        return nil, err
+    }
+
+    for i := range raw.Output {
+        raw.Output[i].Duration = "D"
+    }
+
+    return raw.Output, nil
 }
 
 // GetDailyPrice: 국내주식기간별시세(일/주/월/년)
@@ -62,7 +79,7 @@ func (c *KISClient) GetRecentDailyPrice(symbol string) ([]PriceStruct, error) {
 // Returns:
 //   - A slice of PriceStruct containing date, open, high, low, close, volume, and duration fields
 //   - An error if the API call fails or the response cannot be parsed
-func (c *KISClient) GetDailyPrice(symbol, from, to, duration string) ([]PriceStruct, error) {
+func (c *KISClient) GetDailyPrice(symbol, from, to, duration string) (SlicePriceStruct, error) {
     endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice", KISBaseURL)
 
     c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
@@ -81,12 +98,24 @@ func (c *KISClient) GetDailyPrice(symbol, from, to, duration string) ([]PriceStr
     }
     defer resp_body.Close()
 
-	return parsePriceBody(resp_body, "output2", duration)
+	var raw struct {
+        Output SlicePriceStruct `json:"output2"`
+    }
+
+    if err := json.NewDecoder(resp_body).Decode(&raw); err != nil {
+        return nil, err
+    }
+
+    for i := range raw.Output {
+        raw.Output[i].Duration = "D"
+    }
+
+    return raw.Output, nil
 }
 
 // GetTopFluctuationStocks: 국내주식 등락률 순위
 // Fetches the top 30 ranked stocks by price fluctuation (e.g. 상승률 순)
-func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
+func (c *KISClient) GetTopFluctuationStocks() (SliceRankingStock, error) {
 	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/ranking/fluctuation", KISBaseURL)
 
     c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
@@ -98,7 +127,7 @@ func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
     params.Add("fid_input_iscd", "0000")
     params.Add("fid_rank_sort_cls_code", "0") // 상승율 순
     params.Add("fid_input_cnt_1", "0")
-    params.Add("fid_prc_cls_code", "0")
+    params.Add("fid_prc_cls_code", "1")
     params.Add("fid_input_price_1", "")
     params.Add("fid_input_price_2", "")
     params.Add("fid_vol_cnt", "")
@@ -114,7 +143,81 @@ func (c *KISClient) GetTopFluctuationStocks() ([]RankingStock, error) {
     defer resp_body.Close()
 
 	var result struct {
-		Output []RankingStock `json:"output"`
+		Output SliceRankingStock `json:"output"`
+	}
+
+	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	return result.Output, nil
+}
+
+// GetMostTradedStocks: 거래량순위
+// Fetches the top 30 ranked stocks by volumes traded 
+func (c *KISClient) GetMostTradedStocks() (SliceRankingStock, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/volume-rank", KISBaseURL)
+
+    c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+    params.Add("FID_COND_MRKT_DIV_CODE", "J")
+    params.Add("FID_COND_SCR_DIV_CODE", "20171")
+    params.Add("FID_INPUT_ISCD", "0000")
+    params.Add("FID_DIV_CLS_CODE", "0")
+    params.Add("FID_BLNG_CLS_CODE", "0") // 0: 평균거래량, 3: 거래금액순
+    params.Add("FID_TRGT_CLS_CODE", "111111111")
+    params.Add("FID_TRGT_EXLS_CLS_CODE", "0000000000")
+    params.Add("FID_INPUT_PRICE_1", "")
+    params.Add("FID_INPUT_PRICE_2", "")
+    params.Add("FID_VOL_CNT", "")
+    params.Add("FID_INPUT_DATE_1", "")
+
+    resp_body, err := c.get(endpoint, "FHPST01710000", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
+
+	var result struct {
+		Output SliceRankingStock `json:"output"`
+	}
+
+	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+    fmt.Println(result.Output)
+
+	return result.Output, nil
+}
+
+// GetTopMarketCapStocks: 국내주식 시가총액 상위위
+// Fetches the top 30 ranked stocks by volumes traded 
+func (c *KISClient) GetTopMarketCapStocks() (SliceRankingStock, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/ranking/market-cap", KISBaseURL)
+
+    c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+    params.Add("fid_input_price_2", "")
+    params.Add("fid_cond_mrkt_div_code", "J")
+    params.Add("fid_cond_scr_div_code", "20174")
+    params.Add("fid_div_cls_code", "0")
+    params.Add("fid_input_iscd", "0000") // 0: 평균거래량, 3: 거래금액순
+    params.Add("fid_trgt_cls_code", "0")
+    params.Add("fid_trgt_exls_cls_code", "0")
+    params.Add("fid_input_price_1", "")
+    params.Add("fid_vol_cnt", "")
+
+    resp_body, err := c.get(endpoint, "FHPST01740000", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
+
+	var result struct {
+		Output SliceRankingStock `json:"output"`
 	}
 
 	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
@@ -154,6 +257,11 @@ func (c *KISClient) GetIndexPrice(targetIndex string) (*IndexStruct, error) {
 
     result.Output.Date = time.Now().Format("20060102")
     result.Output.IndexCode = targetIndex
+    if v, ok := indexCodeToName[targetIndex]; ok {
+        result.Output.IndexName = v
+    } else {
+        result.Output.IndexName = targetIndex
+    }
 
 	return &result.Output, nil
 }
@@ -172,55 +280,6 @@ func (c *KISClient) prepareRequestHeader(req *http.Request, trID string) {
 	req.Header.Set("appkey", c.AppKey)
 	req.Header.Set("appsecret", c.AppSecret)
 	req.Header.Set("tr_id", trID)
-}
-
-// parsePriceBody parses a KIS API HTTP response body into a slice of PriceStruct.
-//
-// Parameters:
-//   - body: the response body (io.Reader) from the KIS API call
-//   - targetField: the JSON field name containing the price data array (e.g., "output", "output2")
-//     If you're unsure which field to use, pass "output" as the default.
-//   - duration: a string indicating the time granularity (e.g., "D" for daily, "W" for weekly)
-//
-// Returns:
-//   - A slice of PriceStruct containing date, open, high, low, close, volume, and duration
-//   - An error if decoding or data parsing fails
-func parsePriceBody(body io.Reader, targetField, duration string) ([]PriceStruct, error) {
-    var raw map[string]json.RawMessage
-
-    if err := json.NewDecoder(body).Decode(&raw); err != nil {
-        return nil, fmt.Errorf("failed to decode response: %w", err)
-    }
-
-    data, ok := raw[targetField]
-    if !ok {
-        return nil, fmt.Errorf("field %q not found in response", targetField)
-    }
-
-    var rawPrices []map[string]string
-    if err := json.Unmarshal(data, &rawPrices); err != nil {
-        return nil, fmt.Errorf("failed to parse %s: %w", targetField, err)
-    }
-
-    var prices []PriceStruct
-	for _, entry := range rawPrices {
-		open, _ := strconv.ParseFloat(entry["stck_oprc"], 64)
-		high, _ := strconv.ParseFloat(entry["stck_hgpr"], 64)
-		low, _ := strconv.ParseFloat(entry["stck_lwpr"], 64)
-		closeVal, _ := strconv.ParseFloat(entry["stck_clpr"], 64)
-		volume, _ := strconv.Atoi(entry["acml_vol"])
-
-		prices = append(prices, PriceStruct{
-			Date:     entry["stck_bsop_date"],
-			Open:     open,
-			High:     high,
-			Low:      low,
-			Close:    closeVal,
-			Volume:   volume,
-			Duration: duration,
-		})
-	}
-    return prices, nil
 }
 
 // get sends a GET request to the given KIS API endpoint with headers and query parameters,
