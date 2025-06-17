@@ -10,3 +10,7 @@ MOCK_ACCESS_TOKEN=$(curl -s -X POST "https://openapivts.koreainvestment.com:2944
 
 export "KIS_ACCESS_TOKEN=$ACCESS_TOKEN"
 export "KIS_MOCK_ACCESS_TOKEN=$MOCK_ACCESS_TOKEN"
+
+echo "export KIS_ACCESS_TOKEN=\"$ACCESS_TOKEN\"" >> .env
+echo "export KIS_MOCK_ACCESS_TOKEN=\"$MOCK_ACCESS_TOKEN\"" >> .env
+

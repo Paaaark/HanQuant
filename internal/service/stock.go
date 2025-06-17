@@ -10,19 +10,15 @@ type StockService struct {
 }
 
 func NewStockService() (*StockService, error) {
-	store, err := data.Load("stock_listings.csv")
-	if err != nil {
-		return nil, err
-	}
+	// store, err := data.Load("stock_listings.csv")
+	// if err != nil {
+	// 	return nil, err
+	// }
 
     return &StockService{
-		store: store,
+		store: nil,
         kis:   data.NewKISClient(),
     }, nil
-}
-
-func (s *StockService) SearchStocks(query string) []data.StockIdentity {
-    return s.store.SearchStocks(query)
 }
 
 func (s *StockService) GetRecentPrice(symbol string) (data.SlicePriceStruct, error) {
@@ -43,6 +39,10 @@ func (s *StockService) GetMostTradedStocks() (data.SliceRankingStock, error) {
 
 func (s *StockService) GetTopMarketCapStocks() (data.SliceRankingStock, error) {
 	return s.kis.GetTopMarketCapStocks()
+}
+
+func (s *StockService) GetMultipleStockSnapshot(tickers []string) (data.SliceStockSnapshot, error) {
+	return s.kis.GetMultipleStockSnapshot(tickers);
 }
 
 func (s *StockService) GetIndexPrice(code string) (*data.IndexStruct, error) {

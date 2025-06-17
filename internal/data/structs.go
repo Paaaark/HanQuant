@@ -78,7 +78,7 @@ type StockSnapshot struct {
 	Code       string `json:"inter_shrn_iscd"`
 	Name       string `json:"inter_kor_isnm"`
 	Price      string `json:"inter2_prpr"`
-	Change     string `json:"inter2_prpdy_vrss"`
+	Change     string `json:"inter2_prdy_vrss"`
 	ChangeSign string `json:"prdy_vrss_sign"`
 	ChangeRate string `json:"prdy_ctrt"`
 
@@ -91,8 +91,8 @@ type StockSnapshot struct {
 
 	AskPrice         string `json:"inter2_askp"`
 	BidPrice         string `json:"inter2_bidp"`
-	AskVolume        string `json:"seln_reqn"`
-	BidVolume        string `json:"bhnu_rsqn"`
+	AskVolume        string `json:"seln_rsqn"`
+	BidVolume        string `json:"shnu_rsqn"`
 	TotalAskVolume   string `json:"total_askp_rsqn"`
 	TotalBidVolume   string `json:"total_bidp_rsqn"`
 	TotalTradedValue string `json:"acml_tr_pbmn"`

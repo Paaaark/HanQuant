@@ -227,6 +227,41 @@ func (c *KISClient) GetTopMarketCapStocks() (SliceRankingStock, error) {
 	return result.Output, nil
 }
 
+// GetMultipleStockSnapshot: 관심종목(멀티종목) 시세조회
+// Fetches stock snapshot of multiple stocks
+func (c *KISClient) GetMultipleStockSnapshot(targetCode []string) (SliceStockSnapshot, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/intstock-multprice", KISBaseURL)
+
+    c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+    marketDivCode := "FID_COND_MRKT_DIV_CODE_"
+    inputIscd := "FID_INPUT_ISCD_"
+    for i, v := range targetCode {
+        params.Add(fmt.Sprintf("%s%d", marketDivCode, i + 1), "J")
+        params.Add(fmt.Sprintf("%s%d", inputIscd, i + 1), v)
+    }
+
+    resp_body, err := c.get(endpoint, "FHKST11300006", params)
+    if err != nil {
+        return nil, err
+    }
+    defer resp_body.Close()
+
+    // body, err := io.ReadAll(resp_body)
+    // fmt.Println(string(body))
+
+	var result struct {
+		Output SliceStockSnapshot `json:"output"`
+	}
+
+	if err := json.NewDecoder(resp_body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	return result.Output, nil
+}
+
 // GetIndexPrice: 국내업종 현재지수
 // Fetches index price of the targetIndex (0001: Kospi, 1001: Kosdaq, 2001: Kospi200, 4001: KRX100, and more)
 func (c *KISClient) GetIndexPrice(targetIndex string) (*IndexStruct, error) {

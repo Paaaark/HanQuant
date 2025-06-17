@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -14,13 +13,6 @@ type StockHandler struct {
 
 func NewStockHandler(svc *service.StockService) *StockHandler {
     return &StockHandler{svc: svc}
-}
-
-func (h *StockHandler) SearchStocks(w http.ResponseWriter, r *http.Request) {
-    query := r.URL.Query().Get("q")
-    result := h.svc.SearchStocks(query)
-    w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    json.NewEncoder(w).Encode(result)
 }
 
 func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +91,26 @@ func (h *StockHandler) GetTopMarketCapStocks(w http.ResponseWriter, r *http.Requ
         return
     }
 
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Write(result.EncodeJSON())
+}
+
+func (h *StockHandler) GetMultipleStockSnapshot(w http.ResponseWriter, r *http.Request) {
+    tickerParam := r.URL.Query().Get("tickers")
+    if tickerParam == "" {
+        http.Error(w, "missing tickers parameter", http.StatusBadRequest)
+    }
+    tickers := strings.Split(tickerParam, ",")
+    if len(tickers) > 30 {
+        http.Error(w, "cannot request more than 30 tickers", http.StatusBadRequest)
+        return
+    }
+ 
+    result, err := h.svc.GetMultipleStockSnapshot(tickers)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.Write(result.EncodeJSON())
 }

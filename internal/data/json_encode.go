@@ -56,6 +56,34 @@ func (idx IndexStruct) EncodeJSON() []byte {
 	))
 }
 
+func (s SliceStockSnapshot) EncodeJSON() []byte {
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+
+	for i, snap := range s {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(fmt.Sprintf(
+			`{"Code":"%s","Name":"%s","Price":"%s",`+
+				`"Change":"%s","ChangeSign":"%s","ChangeRate":"%s",`+
+				`"Open":"%s","High":"%s","Low":"%s",`+
+				`"Volume":"%s","SecurityType":"%s","AskPrice":"%s",`+
+				`"BidPrice":"%s","AskVolume":"%s","BidVolume":"%s",`+
+				`"TotalAskVolume":"%s","TotalBidVolume":"%s","TotalTradedValue":"%s"}`,
+			escape(snap.Code), escape(snap.Name), escape(snap.Price),
+			escape(snap.Change), escape(snap.ChangeSign), escape(snap.ChangeRate),
+			escape(snap.Open), escape(snap.High), escape(snap.Low),
+			escape(snap.Volume), escape(snap.SecurityType), escape(snap.AskPrice),
+			escape(snap.BidPrice), escape(snap.AskVolume), escape(snap.BidVolume),
+			escape(snap.TotalAskVolume), escape(snap.TotalBidVolume), escape(snap.TotalTradedValue),
+		))
+	}
+
+	buf.WriteByte(']')
+	return buf.Bytes()
+}
+
 // escape puts a quotation around a string
 func escape(s string) string {
 	return strconv.Quote(s)[1 : len(strconv.Quote(s))-1]
