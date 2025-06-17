@@ -1,14 +1,18 @@
 package data
 
-type StockIdentity struct {
+type StockMeta struct {
 	Code         string // 단축코드
 	ISIN         string // 표준코드
 	Name         string // 종목명
-	SecurityType string // 증권그룹구분코드
+	SecurityType string // 증권그룹
+	CapSize      string // 시총규모 (0,1,2,3)
+	IndLarge     string // 업종 대분류
+	IndMedium    string // 업종 중분류
+	IndSmall     string // 업종 소분류
 }
 
 type StockStore struct {
-	Cache []StockIdentity
+	Cache []StockMeta
 }
 
 type KISClient struct {
@@ -69,3 +73,29 @@ type IndexStruct struct {
 	FallingCnt    string `json:"down_issu_cnt"`
 	LowerLimitCnt string `json:"lslm_issu_cnt"`
 }
+
+type StockSnapshot struct {
+	Code       string `json:"inter_shrn_iscd"`
+	Name       string `json:"inter_kor_isnm"`
+	Price      string `json:"inter2_prpr"`
+	Change     string `json:"inter2_prpdy_vrss"`
+	ChangeSign string `json:"prdy_vrss_sign"`
+	ChangeRate string `json:"prdy_ctrt"`
+
+	Open   string `json:"inter2_oprc"`
+	High   string `json:"inter2_hgpr"`
+	Low    string `json:"inter2_lwpr"`
+	Volume string `json:"acml_vol"`
+
+	SecurityType string `json:"mrkt_trtm_cls_name"`
+
+	AskPrice         string `json:"inter2_askp"`
+	BidPrice         string `json:"inter2_bidp"`
+	AskVolume        string `json:"seln_reqn"`
+	BidVolume        string `json:"bhnu_rsqn"`
+	TotalAskVolume   string `json:"total_askp_rsqn"`
+	TotalBidVolume   string `json:"total_bidp_rsqn"`
+	TotalTradedValue string `json:"acml_tr_pbmn"`
+}
+
+type SliceStockSnapshot []StockSnapshot
