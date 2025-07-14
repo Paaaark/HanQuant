@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Paaaark/hanquant/internal/data"
@@ -73,20 +74,21 @@ func (s *WebSocketService) sendSnapshot(client *data.WSClient) {
 	if len(tickers) == 0 {
 		return
 	}
+	fmt.Println("Tickers received: ", tickers)
 	snaps, err := s.kisClient.GetMultipleStockSnapshot(tickers)
 	if err != nil {
 		s.sendError(client, err.Error())
 		return
 	}
 
+	if len(snaps) >= 1 {
+		fmt.Println("Sent Message: ", snaps[0].Name, snaps[0].Price)
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString(`{"type":"snapshot","data":`)
 	buf.Write(snaps.EncodeJSON())
 	buf.WriteByte('}')
-	// resp, _ := json.Marshal(data.WSMessage{
-	// 	Type: "snapshot",
-	// 	Data: snaps,
-	// })
 	client.Send <- buf.Bytes()
 }
 
@@ -123,11 +125,16 @@ func (s *WebSocketService) broadcastAll() {
 			s.sendError(client, err.Error())
 			continue
 		}
-		resp, _ := json.Marshal(data.WSMessage{
-			Type: "snapshot",
-			Data: snaps,
-		})
-		client.Send <- resp
+
+		if len(snaps) >= 1 {
+			fmt.Println("Sent Message: ", snaps[0].Name, snaps[0].Price)
+		}
+
+		var buf bytes.Buffer
+		buf.WriteString(`{"type":"snapshot","data":`)
+		buf.Write(snaps.EncodeJSON())
+		buf.WriteByte('}')
+		client.Send <- buf.Bytes()
 	}
 }
 

@@ -84,6 +84,39 @@ func (s SliceStockSnapshot) EncodeJSON() []byte {
 	return buf.Bytes()
 }
 
+func (s SlicePortfolioPosition) EncodeJSON() []byte {
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+
+	for i, p := range s {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(fmt.Sprintf(
+			`{"Symbol":"%s","Name":"%s","TradeType":"%s","HoldingQty":"%s","OrderableQty":"%s",`+
+				`"AvgPrice":"%s","PurchaseAmount":"%s","CurrentPrice":"%s","EvaluationAmount":"%s",`+
+				`"UnrealizedPnl":"%s","UnrealizedPnlRate":"%s","FluctuationRate":"%s"}`,
+			escape(p.Symbol), escape(p.Name), escape(p.TradeType),
+			escape(p.HoldingQty), escape(p.OrderableQty), escape(p.AvgPrice),
+			escape(p.PurchaseAmount), escape(p.CurrentPrice), escape(p.EvaluationAmount),
+			escape(p.UnrealizedPnl), escape(p.UnrealizedPnlRate), escape(p.FluctuationRate),
+		))
+	}
+
+	buf.WriteByte(']')
+	return buf.Bytes()
+}
+
+func (a AccountSummary) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"TotalDeposit":"%s","D2Deposit":"%s","TotalPurchaseAmount":"%s","TotalEvaluationAmount":"%s",`+
+			`"TotalUnrealizedPnl":"%s","NetAsset":"%s","AssetChangeAmount":"%s","AssetChangeRate":"%s"}`,
+		escape(a.TotalDeposit), escape(a.D2Deposit), escape(a.TotalPurchaseAmount),
+		escape(a.TotalEvaluationAmount), escape(a.TotalUnrealizedPnl), escape(a.NetAsset),
+		escape(a.AssetChangeAmount), escape(a.AssetChangeRate),
+	))
+}
+
 // escape puts a quotation around a string
 func escape(s string) string {
 	return strconv.Quote(s)[1 : len(strconv.Quote(s))-1]

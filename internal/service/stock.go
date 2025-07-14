@@ -48,3 +48,7 @@ func (s *StockService) GetMultipleStockSnapshot(tickers []string) (data.SliceSto
 func (s *StockService) GetIndexPrice(code string) (*data.IndexStruct, error) {
 	return s.kis.GetIndexPrice(code)
 }
+
+func (s *StockService) GetAccountPortfolio(accNo string, mock bool) (data.SlicePortfolioPosition, *data.AccountSummary, error) {
+	return s.kis.GetAccountPortfolio(accNo, mock)
+}

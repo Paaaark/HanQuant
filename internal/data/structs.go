@@ -99,3 +99,31 @@ type StockSnapshot struct {
 }
 
 type SliceStockSnapshot []StockSnapshot
+
+type PortfolioPosition struct {
+	Symbol            string `json:"pdno"`           // 종목코드
+	Name              string `json:"prdt_name"`      // 종목명
+	TradeType         string `json:"trad_dvsn_name"` // 매매구분
+	HoldingQty        string `json:"hldg_qty"`       // 보유수량
+	OrderableQty      string `json:"ord_psbl_qty"`   // 주문가능수량
+	AvgPrice          string `json:"pchs_avg_pric"`  // 매입평균가
+	PurchaseAmount    string `json:"pchs_amt"`       // 매입금액
+	CurrentPrice      string `json:"prpr"`           // 현재가
+	EvaluationAmount  string `json:"evlu_amt"`       // 평가금액
+	UnrealizedPnl     string `json:"evlu_pfls_amt"`  // 평가손익금액
+	UnrealizedPnlRate string `json:"evlu_pfls_rt"`   // 평가손익율
+	FluctuationRate   string `json:"fltt_rt"`        // 등락율
+}
+
+type SlicePortfolioPosition []PortfolioPosition
+
+type AccountSummary struct {
+	TotalDeposit          string `json:"dnca_tot_amt"`       // 예수금
+	D2Deposit             string `json:"prvs_rcdl_excc_amt"` // D+2 예수금
+	TotalPurchaseAmount   string `json:"pchs_amt_smtl_amt"`  // 매입금액합계
+	TotalEvaluationAmount string `json:"evlu_amt_smtl_amt"`  // 평가금액합계
+	TotalUnrealizedPnl    string `json:"evlu_pfls_smtl_amt"` // 평가손익합계
+	NetAsset              string `json:"nass_amt"`           // 순자산금액
+	AssetChangeAmount     string `json:"asst_icdc_amt"`      // 자산증감액
+	AssetChangeRate       string `json:"asst_icdc_erng_rt"`  // 자산증감수익율
+}

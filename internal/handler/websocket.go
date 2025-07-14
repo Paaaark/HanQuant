@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -26,6 +27,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 			Hub:     h.svc.Hub,
 		}
 		h.svc.Hub.Register <- client
+		fmt.Println("New WebSocket connection establihsed")
 		defer func() {
 			h.svc.Hub.Unregister <- client
 			conn.Close()

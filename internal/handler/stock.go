@@ -133,3 +133,67 @@ func (h *StockHandler) GetIndexPrice(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.Write(result.EncodeJSON())
 }
+
+// GetAccountPortfolio handles:
+//   GET /accounts/{accNo}/portfolio
+func (h *StockHandler) GetAccountPortfolio(w http.ResponseWriter, r *http.Request) {
+	//   /accounts/12345678-01/portfolio
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 3 || parts[0] != "accounts" || parts[2] != "portfolio" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	accNo := parts[1]
+
+	positions, summary, err := h.svc.GetAccountPortfolio(accNo, false /*mock*/ )
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	var resp []byte
+	resp = append(resp, []byte(`{"positions":`)...)
+	resp = append(resp, positions.EncodeJSON()...)
+	resp = append(resp, []byte(`,"summary":`)...)
+	if summary != nil {
+		resp = append(resp, summary.EncodeJSON()...)
+	} else {
+		resp = append(resp, []byte(`null`)...)
+	}
+	resp = append(resp, byte('}'))
+	w.Write(resp)
+}
+
+// GetAccountPortfolioMock handles:
+//   GET /accounts_mock/{accNo}/portfolio
+func (h *StockHandler) GetAccountPortfolioMock(w http.ResponseWriter, r *http.Request) {
+	//   /accounts_mock/12345678-01/portfolio
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 3 || parts[0] != "accounts_mock" || parts[2] != "portfolio" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	accNo := parts[1]
+
+	positions, summary, err := h.svc.GetAccountPortfolio(accNo, true /*mock*/ )
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	var resp []byte
+	resp = append(resp, []byte(`{"positions":`)...)
+	resp = append(resp, positions.EncodeJSON()...)
+	resp = append(resp, []byte(`,"summary":`)...)
+	if summary != nil {
+		resp = append(resp, summary.EncodeJSON()...)
+	} else {
+		resp = append(resp, []byte(`null`)...)
+	}
+	resp = append(resp, byte('}'))
+	w.Write(resp)
+}

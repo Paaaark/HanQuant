@@ -27,6 +27,9 @@ func NewHTTPServer() http.Handler {
     mux.HandleFunc("/snapshot/multstock", apiHandler.GetMultipleStockSnapshot)
     mux.HandleFunc("/index/", apiHandler.GetIndexPrice)
 
+    mux.HandleFunc("/accounts/",      apiHandler.GetAccountPortfolio)
+    mux.HandleFunc("/accounts_mock/", apiHandler.GetAccountPortfolioMock)   
+
     mux.HandleFunc("/ws/stocks", wsHandler.HandleWebSocket)
 
     return mux
