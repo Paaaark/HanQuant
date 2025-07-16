@@ -3,34 +3,44 @@ package server
 import (
 	"net/http"
 
+	"log"
+
 	"github.com/Paaaark/hanquant/internal/data"
 	"github.com/Paaaark/hanquant/internal/handler"
 	"github.com/Paaaark/hanquant/internal/service"
 )
 
 func NewHTTPServer() http.Handler {
-    kisClient := data.NewKISClient()
-    mux := http.NewServeMux()
+	kisClient := data.NewKISClient()
+	mux := http.NewServeMux()
 
-    stockService, _ := service.NewStockService()
-    apiHandler := handler.NewStockHandler(stockService)
-    
-    wsService := service.NewWebSocketService(kisClient)
-    wsHandler := handler.NewWebSocketHandler(wsService)
-    wsService.Start()
+	stockService, _ := service.NewStockService()
+	apiHandler := handler.NewStockHandler(stockService)
 
-    mux.HandleFunc("/prices/recent/", apiHandler.GetRecentPrice)
-    mux.HandleFunc("/prices/historical/", apiHandler.GetHistoricalPrice)
-    mux.HandleFunc("/ranking/fluctuation", apiHandler.GetTopFluctuationStocks)
-    mux.HandleFunc("/ranking/volume", apiHandler.GetMostTradedStocks)
-    mux.HandleFunc("/ranking/market-cap", apiHandler.GetTopMarketCapStocks)
-    mux.HandleFunc("/snapshot/multstock", apiHandler.GetMultipleStockSnapshot)
-    mux.HandleFunc("/index/", apiHandler.GetIndexPrice)
+	wsService := service.NewWebSocketService(kisClient)
+	wsHandler := handler.NewWebSocketHandler(wsService)
+	wsService.Start()
 
-    mux.HandleFunc("/accounts/",      apiHandler.GetAccountPortfolio)
-    mux.HandleFunc("/accounts_mock/", apiHandler.GetAccountPortfolioMock)   
+	mux.HandleFunc("/prices/recent/", apiHandler.GetRecentPrice)
+	mux.HandleFunc("/prices/historical/", apiHandler.GetHistoricalPrice)
+	mux.HandleFunc("/ranking/fluctuation", apiHandler.GetTopFluctuationStocks)
+	mux.HandleFunc("/ranking/volume", apiHandler.GetMostTradedStocks)
+	mux.HandleFunc("/ranking/market-cap", apiHandler.GetTopMarketCapStocks)
+	mux.HandleFunc("/snapshot/multstock", apiHandler.GetMultipleStockSnapshot)
+	mux.HandleFunc("/index/", apiHandler.GetIndexPrice)
 
-    mux.HandleFunc("/ws/stocks", wsHandler.HandleWebSocket)
+	mux.HandleFunc("/accounts/",      apiHandler.GetAccountPortfolio)
+	mux.HandleFunc("/accounts_mock/", apiHandler.GetAccountPortfolioMock)
 
-    return mux
+	mux.HandleFunc("/ws/stocks", wsHandler.HandleWebSocket)
+
+	db, err := data.OpenDB()
+	if err != nil {
+		log.Fatalf("failed to connect to db: %v", err)
+	}
+	authHandler := handler.NewAuthHandler(db)
+	mux.HandleFunc("/register", authHandler.Register)
+	mux.HandleFunc("/login", authHandler.Login)
+
+	return mux
 }
