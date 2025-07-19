@@ -80,11 +80,25 @@ func (c *KISClient) GetAccountPortfolio(accNo string, mock bool) (SlicePortfolio
 	var (
 		allPositions SlicePortfolioPosition
 		summary      *AccountSummary
+		pageCount    int
 	)
 
-	for {
+	var didRetry bool
+
+	// Cap at 3 pages to avoid exceeding API limits, even if tr_cont indicates more data.
+	for pageCount = 0; pageCount < 3; pageCount++ {
 		respBody, err := c.get(endpoint, trID, params)
 		if err != nil {
+			// If token expired, try to refresh and retry ONCE
+			if !didRetry && strings.Contains(err.Error(), "기간이 만료된 token 입니다.") {
+				newToken, refreshErr := RefreshKISToken(c.AppKey, c.AppSecret)
+				if refreshErr == nil {
+					c.AccessToken = newToken
+					didRetry = true
+					pageCount-- // retry this page
+					continue
+				}
+			}
 			return nil, nil, err
 		}
 		defer respBody.Close()

@@ -143,3 +143,41 @@ type OrderResponse struct {
 	Message   string `json:"message"`
 	Success   bool   `json:"success"`
 }
+
+type User struct {
+	ID           int64  `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type UserAccount struct {
+	ID          int64  `json:"id"`
+	UserID      int64  `json:"user_id"`
+	AccountID   string `json:"account_id"`
+	EncCANO     []byte `json:"enc_cano"`
+	EncAppKey   []byte `json:"enc_app_key"`
+	EncAppSecret []byte `json:"enc_app_secret"`
+	IsMock      bool   `json:"is_mock"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type KISAccessToken struct {
+	UserAccountID int64  `json:"user_account_id"`
+	Token         string `json:"token"`
+	ExpiresAt     string `json:"expires_at"`
+	RefreshedAt   string `json:"refreshed_at"`
+}
+
+type Order struct {
+	ID            int64   `json:"id"`
+	UserAccountID int64   `json:"user_account_id"`
+	Symbol        string  `json:"symbol"`
+	Side          string  `json:"side"`
+	Qty           float64 `json:"qty"`
+	OrderType     string  `json:"order_type"`
+	LimitPrice    *float64 `json:"limit_price,omitempty"`
+	Status        string  `json:"status"`
+	KISOrderID    string  `json:"kis_order_id"`
+	CreatedAt     string  `json:"created_at"`
+}

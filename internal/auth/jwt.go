@@ -13,12 +13,14 @@ var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 const TokenValidity = time.Hour
 
 type Claims struct {
+	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(username string) (string, error) {
+func GenerateJWT(userID int64, username string) (string, error) {
 	claims := Claims{
+		UserID:   userID,
 		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(TokenValidity)),

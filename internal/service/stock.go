@@ -6,7 +6,7 @@ import (
 
 type StockService struct {
 	store *data.StockStore
-    kis   *data.KISClient
+    kis   *data.KISClient // default, but not used for user-specific calls
 }
 
 func NewStockService() (*StockService, error) {
@@ -49,10 +49,12 @@ func (s *StockService) GetIndexPrice(code string) (*data.IndexStruct, error) {
 	return s.kis.GetIndexPrice(code)
 }
 
-func (s *StockService) GetAccountPortfolio(accNo string, mock bool) (data.SlicePortfolioPosition, *data.AccountSummary, error) {
-	return s.kis.GetAccountPortfolio(accNo, mock)
+// Accepts a KISClient instance with user credentials
+func (s *StockService) GetAccountPortfolio(kis *data.KISClient, accNo string, mock bool) (data.SlicePortfolioPosition, *data.AccountSummary, error) {
+	return kis.GetAccountPortfolio(accNo, mock)
 }
 
-func (s *StockService) PlaceOrder(accNo string, req data.OrderRequest) (*data.OrderResponse, error) {
-	return s.kis.PlaceOrder(accNo, req)
+// Accepts a KISClient instance with user credentials
+func (s *StockService) PlaceOrder(kis *data.KISClient, accNo string, req data.OrderRequest) (*data.OrderResponse, error) {
+	return kis.PlaceOrder(accNo, req)
 }

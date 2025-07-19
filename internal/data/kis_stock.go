@@ -354,6 +354,8 @@ func (c *KISClient) PlaceOrder(accNo string, req OrderRequest) (*OrderResponse, 
 	c.prepareRequestHeader(httpReq, trID)
 	httpReq.Header.Set("content-type", "application/json; charset=utf-8")
 
+	retry := false
+RETRY:
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("order request failed: %w", err)
@@ -373,6 +375,15 @@ func (c *KISClient) PlaceOrder(accNo string, req OrderRequest) (*OrderResponse, 
 		return nil, fmt.Errorf("decode order response: %w", err)
 	}
 	if raw.RtCd != "0" {
+		// If token expired, try to refresh and retry ONCE
+		if !retry && strings.Contains(raw.Msg1, "기간이 만료된 token 입니다.") {
+			newToken, refreshErr := RefreshKISToken(c.AppKey, c.AppSecret)
+			if refreshErr == nil {
+				c.AccessToken = newToken
+				retry = true
+				goto RETRY
+			}
+		}
 		return &OrderResponse{
 			OrderNo:   "",
 			Timestamp: "",
@@ -468,4 +479,40 @@ func (c *KISClient) GetKISAccessToken() (string, error) {
 
     c.AccessToken = authResp.AccessToken
     return authResp.AccessToken, nil
+}
+
+// RefreshKISToken fetches a new KIS access token for the given appKey/appSecret.
+func RefreshKISToken(appKey, appSecret string) (string, error) {
+	payload := map[string]string{
+		"grant_type": "client_credentials",
+		"appkey":     appKey,
+		"appsecret":  appSecret,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode JSON: %w", err)
+	}
+	url := KISBaseURL + "/oauth2/tokenP"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request error: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		responseBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("unexpected status %s: %s", resp.Status, responseBody)
+	}
+	var authResp struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+	return authResp.AccessToken, nil
 }

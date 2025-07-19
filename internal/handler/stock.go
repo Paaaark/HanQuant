@@ -1,21 +1,26 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Paaaark/hanquant/internal/auth"
 	"github.com/Paaaark/hanquant/internal/data"
 	"github.com/Paaaark/hanquant/internal/service"
+	"github.com/Paaaark/hanquant/pkg/utils"
 )
 
 type StockHandler struct {
-    svc *service.StockService
+	svc *service.StockService
+	DB  *sql.DB
 }
 
-func NewStockHandler(svc *service.StockService) *StockHandler {
-    return &StockHandler{svc: svc}
+func NewStockHandler(svc *service.StockService, db *sql.DB) *StockHandler {
+	return &StockHandler{svc: svc, DB: db}
 }
 
 func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
@@ -149,12 +154,33 @@ func (h *StockHandler) GetAccountPortfolio(w http.ResponseWriter, r *http.Reques
 	}
 	accNo := parts[1]
 
-	_, ok := requireJWT(w, r)
+	userID, _, ok := requireJWT(w, r)
 	if !ok {
 		return
 	}
-
-	positions, summary, err := h.svc.GetAccountPortfolio(accNo, false /*mock*/ )
+	// Find user account
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == accNo {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, `{"error":{"code":"ACCOUNT_NOT_FOUND","message":"No linked account for user"}}`, http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	isMock := ua.IsMock
+	positions, summary, err := h.svc.GetAccountPortfolio(kis, cano, isMock)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -186,12 +212,33 @@ func (h *StockHandler) GetAccountPortfolioMock(w http.ResponseWriter, r *http.Re
 	}
 	accNo := parts[1]
 
-	_, ok := requireJWT(w, r)
+	// Find user account
+	userID, _, ok := requireJWT(w, r)
 	if !ok {
 		return
 	}
-
-	positions, summary, err := h.svc.GetAccountPortfolio(accNo, true /*mock*/ )
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == accNo {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, `{"error":{"code":"ACCOUNT_NOT_FOUND","message":"No linked account for user"}}`, http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	isMock := ua.IsMock
+	positions, summary, err := h.svc.GetAccountPortfolio(kis, cano, isMock)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -211,28 +258,176 @@ func (h *StockHandler) GetAccountPortfolioMock(w http.ResponseWriter, r *http.Re
 	w.Write(resp)
 }
 
+// Handler for GET /portfolio?account_id=...
+func (h *StockHandler) GetPortfolio(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.URL.Query().Get("account_id")
+	if accountID == "" {
+		http.Error(w, `{"error":{"code":"VALIDATION","message":"account_id required"}}`, http.StatusBadRequest)
+		return
+	}
+	// Find user account
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == accountID {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, `{"error":{"code":"ACCOUNT_NOT_FOUND","message":"No linked account for user"}}`, http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	isMock := ua.IsMock
+	positions, summary, err := h.svc.GetAccountPortfolio(kis, cano, isMock)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"KIS","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	resp := struct {
+		AsOf      string                      `json:"as_of"`
+		Positions data.SlicePortfolioPosition `json:"positions"`
+		Summary   *data.AccountSummary        `json:"summary"`
+	}{
+		AsOf:      time.Now().Format(time.RFC3339),
+		Positions: positions,
+		Summary:   summary,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// Handler for POST /orders
+func (h *StockHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		AccountID  string  `json:"account_id"`
+		Symbol     string  `json:"symbol"`
+		Side       string  `json:"side"`
+		Qty        float64 `json:"qty"`
+		OrderType  string  `json:"order_type"`
+		LimitPrice *float64 `json:"limit_price,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":{"code":"VALIDATION","message":"invalid request"}}`, http.StatusBadRequest)
+		return
+	}
+	if req.AccountID == "" || req.Symbol == "" || req.Side == "" || req.Qty <= 0 || req.OrderType == "" {
+		http.Error(w, `{"error":{"code":"VALIDATION","message":"missing or invalid fields"}}`, http.StatusBadRequest)
+		return
+	}
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == req.AccountID {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, `{"error":{"code":"ACCOUNT_NOT_FOUND","message":"No linked account for user"}}`, http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	isMock := ua.IsMock
+	orderReq := data.OrderRequest{
+		Symbol:    req.Symbol,
+		Qty:       fmt.Sprintf("%.2f", req.Qty),
+		OrderType: req.OrderType,
+		Side:      req.Side,
+		Mock:      isMock,
+	}
+	if req.LimitPrice != nil {
+		orderReq.Price = fmt.Sprintf("%.2f", *req.LimitPrice)
+	}
+	orderResp, err := h.svc.PlaceOrder(kis, cano, orderReq)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"KIS","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	// Save order to DB
+	ord := &data.Order{
+		UserAccountID: ua.ID,
+		Symbol:        req.Symbol,
+		Side:          req.Side,
+		Qty:           req.Qty,
+		OrderType:     req.OrderType,
+		LimitPrice:    req.LimitPrice,
+		Status:        "PENDING",
+		KISOrderID:    orderResp.OrderNo,
+	}
+	err = data.CreateOrder(h.DB, ord)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(ord)
+}
+
+// Handler for GET /orders/{id}
+func (h *StockHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	idStr := r.URL.Path[len("/orders/"):] // crude extraction
+	var orderID int64
+	_, err := fmt.Sscanf(idStr, "%d", &orderID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"VALIDATION","message":"invalid order id"}}`, http.StatusBadRequest)
+		return
+	}
+	order, err := data.GetOrderByID(h.DB, userID, orderID)
+	if err != nil {
+		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
+		return
+	}
+	if order == nil {
+		http.Error(w, `{"error":{"code":"NOT_FOUND","message":"order not found"}}`, http.StatusNotFound)
+		return
+	}
+	json.NewEncoder(w).Encode(order)
+}
+
 // Helper to extract and validate JWT from Authorization header
-func requireJWT(w http.ResponseWriter, r *http.Request) (string, bool) {
+func requireJWT(w http.ResponseWriter, r *http.Request) (int64, string, bool) {
 	header := r.Header.Get("Authorization")
 	if header == "" || !strings.HasPrefix(header, "Bearer ") {
 		http.Error(w, "missing or invalid Authorization header", http.StatusUnauthorized)
-		return "", false
+		return 0, "", false
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
 	claims, err := auth.ValidateJWT(token)
 	if err != nil {
 		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
-		return "", false
+		return 0, "", false
 	}
-	return claims.Username, true
+	return claims.UserID, claims.Username, true
 }
 
 // POST /accounts/{accNo}/buy
 func (h *StockHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireJWT(w, r)
-	if !ok {
-		return
-	}
 	trimmed := strings.Trim(r.URL.Path, "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 3 || parts[0] != "accounts" || parts[2] != "buy" {
@@ -246,7 +441,32 @@ func (h *StockHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Side = "buy"
-	resp, err := h.svc.PlaceOrder(accNo, req)
+	// Find user account and decrypt credentials
+	userID, _, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == accNo {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, "No linked account for user", http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	resp, err := h.svc.PlaceOrder(kis, cano, req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -257,10 +477,6 @@ func (h *StockHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 
 // POST /accounts/{accNo}/sell
 func (h *StockHandler) SellStock(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireJWT(w, r)
-	if !ok {
-		return
-	}
 	trimmed := strings.Trim(r.URL.Path, "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 3 || parts[0] != "accounts" || parts[2] != "sell" {
@@ -274,7 +490,32 @@ func (h *StockHandler) SellStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Side = "sell"
-	resp, err := h.svc.PlaceOrder(accNo, req)
+	// Find user account and decrypt credentials
+	userID, _, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	accounts, err := data.GetUserAccountsByUserID(h.DB, userID)
+	if err != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+	var ua *data.UserAccount
+	for i := range accounts {
+		if accounts[i].AccountID == accNo {
+			ua = &accounts[i]
+			break
+		}
+	}
+	if ua == nil {
+		http.Error(w, "No linked account for user", http.StatusNotFound)
+		return
+	}
+	cano, _ := utils.Decrypt(string(ua.EncCANO))
+	appKey, _ := utils.Decrypt(string(ua.EncAppKey))
+	appSecret, _ := utils.Decrypt(string(ua.EncAppSecret))
+	kis := &data.KISClient{AppKey: appKey, AppSecret: appSecret}
+	resp, err := h.svc.PlaceOrder(kis, cano, req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
