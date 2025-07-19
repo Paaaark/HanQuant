@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"log"
+	"strings"
 
 	"github.com/Paaaark/hanquant/internal/data"
 	"github.com/Paaaark/hanquant/internal/handler"
@@ -29,7 +30,18 @@ func NewHTTPServer() http.Handler {
 	mux.HandleFunc("/snapshot/multstock", apiHandler.GetMultipleStockSnapshot)
 	mux.HandleFunc("/index/", apiHandler.GetIndexPrice)
 
-	mux.HandleFunc("/accounts/",      apiHandler.GetAccountPortfolio)
+	mux.HandleFunc("/accounts/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/buy") && r.Method == http.MethodPost {
+			apiHandler.BuyStock(w, r)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/sell") && r.Method == http.MethodPost {
+			apiHandler.SellStock(w, r)
+			return
+		}
+		// fallback to portfolio handler
+		apiHandler.GetAccountPortfolio(w, r)
+	})
 	mux.HandleFunc("/accounts_mock/", apiHandler.GetAccountPortfolioMock)
 
 	mux.HandleFunc("/ws/stocks", wsHandler.HandleWebSocket)

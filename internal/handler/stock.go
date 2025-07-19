@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
+	"github.com/Paaaark/hanquant/internal/auth"
+	"github.com/Paaaark/hanquant/internal/data"
 	"github.com/Paaaark/hanquant/internal/service"
 )
 
@@ -146,6 +149,11 @@ func (h *StockHandler) GetAccountPortfolio(w http.ResponseWriter, r *http.Reques
 	}
 	accNo := parts[1]
 
+	_, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+
 	positions, summary, err := h.svc.GetAccountPortfolio(accNo, false /*mock*/ )
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -178,6 +186,11 @@ func (h *StockHandler) GetAccountPortfolioMock(w http.ResponseWriter, r *http.Re
 	}
 	accNo := parts[1]
 
+	_, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+
 	positions, summary, err := h.svc.GetAccountPortfolio(accNo, true /*mock*/ )
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -196,4 +209,76 @@ func (h *StockHandler) GetAccountPortfolioMock(w http.ResponseWriter, r *http.Re
 	}
 	resp = append(resp, byte('}'))
 	w.Write(resp)
+}
+
+// Helper to extract and validate JWT from Authorization header
+func requireJWT(w http.ResponseWriter, r *http.Request) (string, bool) {
+	header := r.Header.Get("Authorization")
+	if header == "" || !strings.HasPrefix(header, "Bearer ") {
+		http.Error(w, "missing or invalid Authorization header", http.StatusUnauthorized)
+		return "", false
+	}
+	token := strings.TrimPrefix(header, "Bearer ")
+	claims, err := auth.ValidateJWT(token)
+	if err != nil {
+		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+		return "", false
+	}
+	return claims.Username, true
+}
+
+// POST /accounts/{accNo}/buy
+func (h *StockHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 3 || parts[0] != "accounts" || parts[2] != "buy" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	accNo := parts[1]
+	var req data.OrderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Side = "buy"
+	resp, err := h.svc.PlaceOrder(accNo, req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// POST /accounts/{accNo}/sell
+func (h *StockHandler) SellStock(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireJWT(w, r)
+	if !ok {
+		return
+	}
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 3 || parts[0] != "accounts" || parts[2] != "sell" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	accNo := parts[1]
+	var req data.OrderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Side = "sell"
+	resp, err := h.svc.PlaceOrder(accNo, req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

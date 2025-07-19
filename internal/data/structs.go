@@ -127,3 +127,19 @@ type AccountSummary struct {
 	AssetChangeAmount     string `json:"asst_icdc_amt"`      // 자산증감액
 	AssetChangeRate       string `json:"asst_icdc_erng_rt"`  // 자산증감수익율
 }
+
+type OrderRequest struct {
+	Symbol    string `json:"symbol"`
+	Qty       string `json:"qty"`
+	Price     string `json:"price"`
+	OrderType string `json:"order_type"` // e.g. 00=limit, 01=market
+	Side      string `json:"side"`       // "buy" or "sell"
+	Mock      bool   `json:"mock"`       // true for paper trading
+}
+
+type OrderResponse struct {
+	OrderNo   string `json:"order_no"`
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Success   bool   `json:"success"`
+}

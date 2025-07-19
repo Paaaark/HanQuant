@@ -52,3 +52,7 @@ func (s *StockService) GetIndexPrice(code string) (*data.IndexStruct, error) {
 func (s *StockService) GetAccountPortfolio(accNo string, mock bool) (data.SlicePortfolioPosition, *data.AccountSummary, error) {
 	return s.kis.GetAccountPortfolio(accNo, mock)
 }
+
+func (s *StockService) PlaceOrder(accNo string, req data.OrderRequest) (*data.OrderResponse, error) {
+	return s.kis.PlaceOrder(accNo, req)
+}

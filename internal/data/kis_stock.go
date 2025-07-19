@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -299,6 +300,92 @@ func (c *KISClient) GetIndexPrice(targetIndex string) (*IndexStruct, error) {
     }
 
 	return &result.Output, nil
+}
+
+// PlaceOrder places a buy or sell order using the KIS API.
+func (c *KISClient) PlaceOrder(accNo string, req OrderRequest) (*OrderResponse, error) {
+	baseURL := KISBaseURL
+	trID := "TTTC0012U" // Buy (real)
+	if req.Side == "sell" {
+		trID = "TTTC0011U" // Sell (real)
+	}
+	if req.Mock {
+		baseURL = KISBaseURLMock
+		if req.Side == "buy" {
+			trID = "VTTC0012U"
+		} else {
+			trID = "VTTC0011U"
+		}
+	}
+
+	endpoint := baseURL + "/uapi/domestic-stock/v1/trading/order-cash"
+
+	// Split accNo into CANO and ACNT_PRDT_CD
+	parts := strings.SplitN(accNo, "-", 2)
+	if len(parts) != 2 || len(parts[0]) != 8 || len(parts[1]) != 2 {
+		return nil, fmt.Errorf("invalid account format (want 8-2 with dash): %q", accNo)
+	}
+	cano, acntPrdt := parts[0], parts[1]
+
+	// Build JSON body (all keys UPPERCASE)
+	body := map[string]string{
+		"CANO":         cano,
+		"ACNT_PRDT_CD": acntPrdt,
+		"PDNO":         req.Symbol,
+		"ORD_DVSN":     req.OrderType,
+		"ORD_QTY":      req.Qty,
+		"ORD_UNPR":     req.Price,
+	}
+	if req.Side == "sell" {
+		body["SLL_TYPE"] = "01" // normal sell
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal order body: %w", err)
+	}
+
+	c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	httpReq, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create order request: %w", err)
+	}
+	c.prepareRequestHeader(httpReq, trID)
+	httpReq.Header.Set("content-type", "application/json; charset=utf-8")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("order request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		RtCd   string `json:"rt_cd"`
+		MsgCd  string `json:"msg_cd"`
+		Msg1   string `json:"msg1"`
+		Output struct {
+			OrderNo   string `json:"odno"`
+			OrdTmd    string `json:"ord_tmd"`
+		} `json:"output"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode order response: %w", err)
+	}
+	if raw.RtCd != "0" {
+		return &OrderResponse{
+			OrderNo:   "",
+			Timestamp: "",
+			Message:   raw.Msg1,
+			Success:   false,
+		}, nil
+	}
+	return &OrderResponse{
+		OrderNo:   raw.Output.OrderNo,
+		Timestamp: raw.Output.OrdTmd,
+		Message:   raw.Msg1,
+		Success:   true,
+	}, nil
 }
 
 // prepareRequestHeaders sets the standard headers required for KIS API requests.

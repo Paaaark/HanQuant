@@ -118,7 +118,7 @@ func (c *KISClient) GetAccountPortfolio(accNo string, mock bool) (SlicePortfolio
 
 		params.Set("CTX_AREA_FK100", raw.CtxFK100)
 		params.Set("CTX_AREA_NK100", raw.CtxNK100)
-		break
+		// continue to next page
 	}
 
 	return allPositions, summary, nil
