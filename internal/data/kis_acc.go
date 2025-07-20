@@ -86,7 +86,7 @@ func (c *KISClient) GetAccountPortfolio(accNo string, mock bool) (SlicePortfolio
 	var didRetry bool
 
 	// Cap at 3 pages to avoid exceeding API limits, even if tr_cont indicates more data.
-	for pageCount = 0; pageCount < 3; pageCount++ {
+	for pageCount = 0; pageCount < 1; pageCount++ {
 		respBody, err := c.get(endpoint, trID, params)
 		if err != nil {
 			// If token expired, try to refresh and retry ONCE

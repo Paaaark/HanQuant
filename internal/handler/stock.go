@@ -305,7 +305,20 @@ func (h *StockHandler) GetPortfolio(w http.ResponseWriter, r *http.Request) {
 		Positions: positions,
 		Summary:   summary,
 	}
-	json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	var buf []byte
+	buf = append(buf, []byte(`{"AsOf":`)...)
+	buf = append(buf, []byte(fmt.Sprintf("\"%s\"", resp.AsOf))...)
+	buf = append(buf, []byte(`,"Positions":`)...)
+	buf = append(buf, resp.Positions.EncodeJSON()...)
+	buf = append(buf, []byte(`,"Summary":`)...)
+	if resp.Summary != nil {
+		buf = append(buf, resp.Summary.EncodeJSON()...)
+	} else {
+		buf = append(buf, []byte(`null`)...)
+	}
+	buf = append(buf, byte('}'))
+	w.Write(buf)
 }
 
 // Handler for POST /orders
@@ -382,7 +395,8 @@ func (h *StockHandler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"code":"DB","message":"`+err.Error()+`"}}`, http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(ord)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(ord.EncodeJSON())
 }
 
 // Handler for GET /orders/{id}
@@ -407,7 +421,8 @@ func (h *StockHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"code":"NOT_FOUND","message":"order not found"}}`, http.StatusNotFound)
 		return
 	}
-	json.NewEncoder(w).Encode(order)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(order.EncodeJSON())
 }
 
 // Helper to extract and validate JWT from Authorization header
@@ -471,8 +486,8 @@ func (h *StockHandler) BuyStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(resp.EncodeJSON())
 }
 
 // POST /accounts/{accNo}/sell
@@ -520,6 +535,6 @@ func (h *StockHandler) SellStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(resp.EncodeJSON())
 }

@@ -117,6 +117,54 @@ func (a AccountSummary) EncodeJSON() []byte {
 	))
 }
 
+// Add for Order
+func (o Order) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"ID":%d,"UserAccountID":%d,"Symbol":"%s","Side":"%s","Qty":%f,"OrderType":"%s","LimitPrice":%s,"Status":"%s","KISOrderID":"%s","CreatedAt":"%s"}`,
+		o.ID, o.UserAccountID, escape(o.Symbol), escape(o.Side), o.Qty, escape(o.OrderType),
+		encodeNullableFloat(o.LimitPrice), escape(o.Status), escape(o.KISOrderID), escape(o.CreatedAt),
+	))
+}
+
+func encodeNullableFloat(f *float64) string {
+	if f == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%f", *f)
+}
+
+// Add for OrderResponse
+func (o OrderResponse) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"OrderNo":"%s","Timestamp":"%s","Message":"%s","Success":%t}`,
+		escape(o.OrderNo), escape(o.Timestamp), escape(o.Message), o.Success,
+	))
+}
+
+// Add for UserAccount
+func (ua UserAccount) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"ID":%d,"UserID":%d,"AccountID":"%s","EncCANO":"%s","EncAppKey":"%s","EncAppSecret":"%s","IsMock":%t,"CreatedAt":"%s"}`,
+		ua.ID, ua.UserID, escape(ua.AccountID), escape(string(ua.EncCANO)), escape(string(ua.EncAppKey)), escape(string(ua.EncAppSecret)), ua.IsMock, escape(ua.CreatedAt),
+	))
+}
+
+// Add for KISAccessToken
+func (t KISAccessToken) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"UserAccountID":%d,"Token":"%s","ExpiresAt":"%s","RefreshedAt":"%s"}`,
+		t.UserAccountID, escape(t.Token), escape(t.ExpiresAt), escape(t.RefreshedAt),
+	))
+}
+
+// Add for User
+func (u User) EncodeJSON() []byte {
+	return []byte(fmt.Sprintf(
+		`{"ID":%d,"Username":"%s","CreatedAt":"%s"}`,
+		u.ID, escape(u.Username), escape(u.CreatedAt),
+	))
+}
+
 // escape puts a quotation around a string
 func escape(s string) string {
 	return strconv.Quote(s)[1 : len(strconv.Quote(s))-1]
