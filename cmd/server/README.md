@@ -64,6 +64,14 @@ Authenticates a user and returns a JWT and refresh token.
   "refresh_expires_at": "RFC3339 timestamp"
 }
 ```
+Where:
+- `token` — JWT to include in the `Authorization` header for authenticated
+  requests.
+- `refresh_token` — long‑lived token used with `/auth/refresh` to obtain a new
+  JWT.
+- `expires_in` — seconds until the JWT expires.
+- `refresh_expires_at` — RFC3339 timestamp when the refresh token becomes
+  invalid.
 
 - `400 Bad Request` — Invalid JSON or missing fields
 - `401 Unauthorized` — Invalid username or password
@@ -102,6 +110,9 @@ Refreshes the JWT using a valid refresh token.
   "expires_in": 3600
 }
 ```
+Where:
+- `token` — New JWT for subsequent requests.
+- `expires_in` — Seconds until the returned JWT expires.
 
 - `400 Bad Request` — Invalid request
 - `401 Unauthorized` — Invalid or expired refresh token
@@ -145,6 +156,16 @@ Links a KIS account and API keys to the authenticated user.
 - `409 Conflict` — Account already linked
 - `500 Internal Server Error` — Server error
 
+The returned object has the following fields:
+- `id` — Numeric identifier for the link record.
+- `user_id` — ID of the owner user.
+- `account_id` — Friendly identifier for the account.
+- `enc_cano` — Encrypted CANO value (8‑2 account number).
+- `enc_app_key` — Encrypted API key.
+- `enc_app_secret` — Encrypted API secret.
+- `is_mock` — `true` when using a mock/paper account.
+- `created_at` — Timestamp the link was created.
+
 **Example Error Responses:**
 
 ```json
@@ -168,6 +189,10 @@ Returns all KIS accounts linked to the authenticated user.
 
 - `200 OK` — Array of account objects
 - `500 Internal Server Error` — Server error
+
+Each object in the array contains the same fields returned by
+`POST /accounts` (`id`, `user_id`, `account_id`, `enc_cano`,
+`enc_app_key`, `enc_app_secret`, `is_mock`, `created_at`).
 
 **Example Error Response:**
 
@@ -227,6 +252,40 @@ Returns the portfolio for a specific linked account.
 - `404 Not Found` — No linked account for user
 - `500 Internal Server Error` — Server or KIS error
 
+Successful responses look like:
+
+```json
+{
+  "as_of": "RFC3339 timestamp",
+  "positions": [
+    {
+      "Symbol": "string",
+      "Name": "string",
+      "TradeType": "string",
+      "HoldingQty": "string",
+      "OrderableQty": "string",
+      "AvgPrice": "string",
+      "PurchaseAmount": "string",
+      "CurrentPrice": "string",
+      "EvaluationAmount": "string",
+      "UnrealizedPnl": "string",
+      "UnrealizedPnlRate": "string",
+      "FluctuationRate": "string"
+    }
+  ],
+  "summary": {
+    "TotalDeposit": "string",
+    "D2Deposit": "string",
+    "TotalPurchaseAmount": "string",
+    "TotalEvaluationAmount": "string",
+    "TotalUnrealizedPnl": "string",
+    "NetAsset": "string",
+    "AssetChangeAmount": "string",
+    "AssetChangeRate": "string"
+  }
+}
+```
+
 **Example Error Responses:**
 
 ```json
@@ -266,6 +325,23 @@ Places a buy or sell order for a stock using a linked account.
 - `404 Not Found` — No linked account for user
 - `500 Internal Server Error` — Server or KIS error
 
+Example order object:
+
+```json
+{
+  "id": 1,
+  "user_account_id": 2,
+  "symbol": "005930",
+  "side": "BUY",
+  "qty": 10.0,
+  "order_type": "LIMIT",
+  "limit_price": 70000,
+  "status": "PENDING",
+  "kis_order_id": "...",
+  "created_at": "RFC3339 timestamp"
+}
+```
+
 **Example Error Responses:**
 
 ```json
@@ -296,6 +372,9 @@ Returns details for a specific order.
 - `404 Not Found` — Order not found
 - `500 Internal Server Error` — Server error
 
+The returned object shares the same shape as in `POST /orders`. See above for a
+field-by-field example of the order JSON structure.
+
 **Example Error Responses:**
 
 ```json
@@ -320,6 +399,22 @@ Returns the most recent price for a given stock symbol.
 - `200 OK` — Price data
 - `400 Bad Request` — Invalid path
 - `500 Internal Server Error` — Server error
+
+Returns an array of objects:
+
+```json
+[
+  {
+    "Date": "YYYYMMDD",
+    "Open": "string",
+    "High": "string",
+    "Low": "string",
+    "Close": "string",
+    "Volume": "string",
+    "Duration": "D"
+  }
+]
+```
 </details>
 
 <details>
@@ -339,6 +434,9 @@ Returns historical price data for a stock symbol.
 - `200 OK` — Historical price data
 - `400 Bad Request` — Missing query parameters
 - `500 Internal Server Error` — Server error
+
+Response body is the same array of objects described for
+`GET /prices/recent/{symbol}` with the requested date range.
 </details>
 
 <details>
@@ -351,6 +449,13 @@ Returns stocks with the highest price fluctuations.
 
 - `200 OK` — List of stocks
 - `500 Internal Server Error` — Server error
+Fields are the same as the other ranking endpoints (`Code`, `Name`, `Price`,
+etc.).
+Each element uses the same fields as `/ranking/fluctuation`.
+
+Each entry has the following properties:
+`Code`, `Name`, `Price`, `Change`, `ChangeSign`, `ChangeRate`, `Volume`,
+`MarketCap`, and `Rank`.
 </details>
 
 <details>
@@ -392,6 +497,10 @@ Returns snapshot data for up to 30 stock tickers.
 - `200 OK` — Snapshot data
 - `400 Bad Request` — Missing tickers or too many tickers
 - `500 Internal Server Error` — Server error
+
+Each snapshot entry includes pricing information and order book depth with
+fields such as `Code`, `Name`, `Price`, `Change`, `Open`, `High`, `Low`,
+`Volume`, `AskPrice`, `BidPrice`, and many more (see `StockSnapshot` struct).
 </details>
 
 <details>
@@ -409,6 +518,29 @@ Returns the price for a given index code.
 - `200 OK` — Index price data
 - `400 Bad Request` — Missing index code
 - `500 Internal Server Error` — Server error
+
+Example response:
+
+```json
+{
+  "IndexCode": "0001",
+  "IndexName": "Kospi",
+  "Date": "YYYYMMDD",
+  "CurrentPrice": "string",
+  "ChangeFromPrev": "string",
+  "ChangeSign": "string",
+  "ChangeRate": "string",
+  "Open": "string",
+  "High": "string",
+  "Low": "string",
+  "Volume": "string",
+  "RisingCnt": "string",
+  "UpperLimitCnt": "string",
+  "FlatCnt": "string",
+  "FallingCnt": "string",
+  "LowerLimitCnt": "string"
+}
+```
 </details>
 
 <details>
@@ -420,6 +552,33 @@ Establishes a WebSocket connection for real-time stock updates.
 **Response:**
 
 - Real-time JSON messages for subscribed tickers
+
+Clients send messages of the form:
+
+```json
+{ "type": "subscribe", "tickers": ["005930", "000660"] }
+```
+
+or
+
+```json
+{ "type": "unsubscribe", "tickers": ["005930"] }
+```
+
+Incoming updates have:
+
+```json
+{
+  "type": "snapshot",
+  "data": [ { /* StockSnapshot fields */ } ]
+}
+```
+
+If an error occurs, the server sends:
+
+```json
+{ "type": "error", "error": "message" }
+```
 </details>
 
 ---
