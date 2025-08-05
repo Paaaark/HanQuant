@@ -157,6 +157,24 @@ func (t KISAccessToken) EncodeJSON() []byte {
 	))
 }
 
+// Add for SliceMinutePriceStruct
+func (s SliceMinutePriceStruct) EncodeJSON() []byte {
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+
+	for i, p := range s {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(fmt.Sprintf(`{"DateTime":"%s","Open":"%s","High":"%s","Low":"%s","Close":"%s","Volume":"%s","Duration":"%s"}`,
+			escape(p.DateTime), escape(p.Open), escape(p.High),
+			escape(p.Low), escape(p.Close), escape(p.Volume), escape(p.Duration)))
+	}
+
+	buf.WriteByte(']')
+	return buf.Bytes()
+}
+
 // Add for User
 func (u User) EncodeJSON() []byte {
 	return []byte(fmt.Sprintf(

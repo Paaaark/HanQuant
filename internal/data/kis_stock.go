@@ -514,5 +514,93 @@ func RefreshKISToken(appKey, appSecret string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
-	return authResp.AccessToken, nil
+    return authResp.AccessToken, nil
+}
+
+// GetDailyStockData: 국내주식기간별시세(일/주/월/년) - Enhanced version for historical data
+// Retrieves daily stock prices for a given symbol between two dates with better error handling
+func (c *KISClient) GetDailyStockData(symbol, from, to string) (SlicePriceStruct, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice", KISBaseURL)
+
+	c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+	params.Add("FID_COND_MRKT_DIV_CODE", "J")
+	params.Add("FID_INPUT_ISCD", symbol)
+	params.Add("FID_INPUT_DATE_1", from)
+	params.Add("FID_INPUT_DATE_2", to)
+	params.Add("FID_PERIOD_DIV_CODE", "D")
+	params.Add("FID_ORG_ADJ_PRC", "0")
+
+	respBody, err := c.get(endpoint, "FHKST03010100", params)
+	if err != nil {
+		return nil, err
+	}
+	defer respBody.Close()
+
+	var raw struct {
+		RtCd   string            `json:"rt_cd"`
+		MsgCd  string            `json:"msg_cd"`
+		Msg1   string            `json:"msg1"`
+		Output SlicePriceStruct  `json:"output2"`
+	}
+
+	if err := json.NewDecoder(respBody).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	if raw.RtCd != "0" {
+		return nil, fmt.Errorf("KIS API error %s: %s", raw.MsgCd, raw.Msg1)
+	}
+
+	for i := range raw.Output {
+		raw.Output[i].Duration = "D"
+	}
+
+	return raw.Output, nil
+}
+
+// GetMinuteStockData: 국내주식 분봉 데이터 조회
+// Retrieves minute-by-minute stock prices for a given symbol between two dates
+func (c *KISClient) GetMinuteStockData(symbol, from, to string) (SliceMinutePriceStruct, error) {
+	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice", KISBaseURL)
+
+	c.AccessToken = os.Getenv(KIS_ACCESS_TOKEN)
+
+	params := url.Values{}
+	params.Add("FID_COND_MRKT_DIV_CODE", "J")
+	params.Add("FID_INPUT_ISCD", symbol)
+	params.Add("FID_INPUT_DATE_1", from)
+	params.Add("FID_INPUT_DATE_2", to)
+	params.Add("FID_INPUT_TIME_1", "090000") // Start time: 09:00:00
+	params.Add("FID_INPUT_TIME_2", "153000") // End time: 15:30:00
+	params.Add("FID_PERIOD_DIV_CODE", "M")   // Minute data
+	params.Add("FID_ORG_ADJ_PRC", "0")
+
+	respBody, err := c.get(endpoint, "FHKST03010200", params)
+	if err != nil {
+		return nil, err
+	}
+	defer respBody.Close()
+
+	var raw struct {
+		RtCd   string                    `json:"rt_cd"`
+		MsgCd  string                    `json:"msg_cd"`
+		Msg1   string                    `json:"msg1"`
+		Output SliceMinutePriceStruct    `json:"output2"`
+	}
+
+	if err := json.NewDecoder(respBody).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	if raw.RtCd != "0" {
+		return nil, fmt.Errorf("KIS API error %s: %s", raw.MsgCd, raw.Msg1)
+	}
+
+	for i := range raw.Output {
+		raw.Output[i].Duration = "M"
+	}
+
+	return raw.Output, nil
 }

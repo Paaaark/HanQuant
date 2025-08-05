@@ -181,3 +181,32 @@ type Order struct {
 	KISOrderID    string  `json:"kis_order_id"`
 	CreatedAt     string  `json:"created_at"`
 }
+
+// MinutePriceStruct for minute-by-minute stock data
+type MinutePriceStruct struct {
+	DateTime string `json:"stck_cntg_hour"` // YYYYMMDDHHMMSS format
+	Open     string `json:"stck_oprc"`
+	High     string `json:"stck_hgpr"`
+	Low      string `json:"stck_lwpr"`
+	Close    string `json:"stck_prpr"`
+	Volume   string `json:"cntg_vol"`
+	Duration string // Always "M" for minute data
+}
+
+type SliceMinutePriceStruct []MinutePriceStruct
+
+// HistoricalDataRequest for fetching historical data
+type HistoricalDataRequest struct {
+	Symbol   string `json:"symbol"`
+	FromDate string `json:"from_date"` // YYYYMMDD format
+	ToDate   string `json:"to_date"`   // YYYYMMDD format
+	Duration string `json:"duration"`  // "D" for daily, "M" for minute
+}
+
+// S3Config for AWS S3 configuration
+type S3Config struct {
+	BucketName string
+	Region     string
+	AccessKey  string
+	SecretKey  string
+}
