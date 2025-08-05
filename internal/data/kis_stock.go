@@ -434,6 +434,10 @@ func (c *KISClient) get(endpoint, trID string, params url.Values) (io.ReadCloser
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
+		// Check for HTTP rate limiting status codes
+		if resp.StatusCode == 429 || resp.StatusCode == 503 {
+			return nil, fmt.Errorf("KIS API HTTP RATE LIMIT EXCEEDED - Status: %s, Body: %s - Please slow down API calls", resp.Status, string(b))
+		}
 		return nil, fmt.Errorf("KIS error: %s\n%s", resp.Status, string(b))
 	}
 
@@ -550,6 +554,15 @@ func (c *KISClient) GetDailyStockData(symbol, from, to string) (SlicePriceStruct
 	}
 
 	if raw.RtCd != "0" {
+		// Check for rate limiting or quota exceeded errors
+		if strings.Contains(raw.Msg1, "TOO_MANY_REQUESTS") || 
+		   strings.Contains(raw.Msg1, "RATE_LIMIT") || 
+		   strings.Contains(raw.Msg1, "QUOTA_EXCEEDED") ||
+		   strings.Contains(raw.Msg1, "초과") ||
+		   strings.Contains(raw.Msg1, "제한") ||
+		   strings.Contains(raw.MsgCd, "429") {
+			return nil, fmt.Errorf("KIS API RATE LIMIT EXCEEDED - Code: %s, Message: %s - Please slow down API calls", raw.MsgCd, raw.Msg1)
+		}
 		return nil, fmt.Errorf("KIS API error %s: %s", raw.MsgCd, raw.Msg1)
 	}
 
@@ -560,7 +573,7 @@ func (c *KISClient) GetDailyStockData(symbol, from, to string) (SlicePriceStruct
 	return raw.Output, nil
 }
 
-// GetMinuteStockData: 국내주식 분봉 데이터 조회
+// GetMinuteStockData: 주식일별분봉조회
 // Retrieves minute-by-minute stock prices for a given symbol between two dates
 func (c *KISClient) GetMinuteStockData(symbol, from, to string) (SliceMinutePriceStruct, error) {
 	endpoint := fmt.Sprintf("%s/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice", KISBaseURL)
@@ -595,6 +608,15 @@ func (c *KISClient) GetMinuteStockData(symbol, from, to string) (SliceMinutePric
 	}
 
 	if raw.RtCd != "0" {
+		// Check for rate limiting or quota exceeded errors
+		if strings.Contains(raw.Msg1, "TOO_MANY_REQUESTS") || 
+		   strings.Contains(raw.Msg1, "RATE_LIMIT") || 
+		   strings.Contains(raw.Msg1, "QUOTA_EXCEEDED") ||
+		   strings.Contains(raw.Msg1, "초과") ||
+		   strings.Contains(raw.Msg1, "제한") ||
+		   strings.Contains(raw.MsgCd, "429") {
+			return nil, fmt.Errorf("KIS API RATE LIMIT EXCEEDED - Code: %s, Message: %s - Please slow down API calls", raw.MsgCd, raw.Msg1)
+		}
 		return nil, fmt.Errorf("KIS API error %s: %s", raw.MsgCd, raw.Msg1)
 	}
 

@@ -28,7 +28,7 @@ func main() {
 		log.Fatalf("create data directory: %v", err)
 	}
 
-	outPath := filepath.Join(dataDir, "stock_listings_2.csv")
+	outPath := filepath.Join(dataDir, "stock_listings.csv")
 
 	// Market configurations with download URLs
 	markets := []marketConfig{

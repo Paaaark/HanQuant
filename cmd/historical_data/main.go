@@ -1,21 +1,38 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Paaaark/hanquant/internal/data"
 	"github.com/Paaaark/hanquant/internal/service"
 )
 
+// rateLimiter ensures we don't exceed 20 API calls per second across multiple service calls
+type rateLimiter struct {
+	lastCall time.Time
+}
+
+func (rl *rateLimiter) wait() {
+	// Ensure at least 50ms between calls (20 calls per second = 50ms per call)
+	elapsed := time.Since(rl.lastCall)
+	if elapsed < 50*time.Millisecond {
+		time.Sleep(50*time.Millisecond - elapsed)
+	}
+	rl.lastCall = time.Now()
+}
+
 func main() {
 	// Define command line flags
 	var (
-		action     = flag.String("action", "", "Action to perform: fetch-daily, fetch-minute, load-daily, load-minute, bulk-daily, bulk-minute")
+		action     = flag.String("action", "", "Action to perform: fetch-daily, fetch-minute, load-daily, load-minute, bulk-daily, bulk-minute, fetch-all-daily-data")
 		symbol     = flag.String("symbol", "", "Stock symbol (e.g., 005930)")
 		fromDate   = flag.String("from", "", "Start date (YYYYMMDD format)")
 		toDate     = flag.String("to", "", "End date (YYYYMMDD format)")
@@ -117,9 +134,100 @@ func main() {
 		}
 		fmt.Println("Successfully completed bulk minute data fetch")
 
+	case "fetch-all-daily-data":
+		if *toDate == "" {
+			log.Fatal("To date is required for fetch-all-daily-data action")
+		}
+		err := fetchAllDailyData(historicalService, *toDate)
+		if err != nil {
+			log.Fatalf("Failed to fetch all daily data: %v", err)
+		}
+		fmt.Println("Successfully completed fetch-all-daily-data")
+
 	default:
 		log.Fatalf("Unknown action: %s", *action)
 	}
+}
+
+// loadStockSymbolsFromCSV reads stock symbols from the stock_listings.csv file
+func loadStockSymbolsFromCSV() ([]string, error) {
+	csvPath := filepath.Join(".kis_data", "stock_listings.csv")
+	
+	file, err := os.Open(csvPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open stock listings CSV: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV: %w", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("CSV file is empty or has no data rows")
+	}
+
+	var symbols []string
+	// Skip header row, start from index 1
+	for i := 1; i < len(records); i++ {
+		if len(records[i]) > 0 {
+			symbol := strings.TrimSpace(records[i][0])
+			if symbol != "" {
+				symbols = append(symbols, symbol)
+			}
+		}
+	}
+
+	return symbols, nil
+}
+
+// fetchAllDailyData fetches 10 years of daily data for all stock symbols
+func fetchAllDailyData(historicalService *service.HistoricalService, toDate string) error {
+	// Load all stock symbols from CSV
+	symbols, err := loadStockSymbolsFromCSV()
+	if err != nil {
+		return fmt.Errorf("failed to load stock symbols: %w", err)
+	}
+
+	fmt.Printf("Loaded %d stock symbols from stock_listings.csv\n", len(symbols))
+
+	// Parse toDate to calculate fromDate (10 years back)
+	toTime, err := time.Parse("20060102", toDate)
+	if err != nil {
+		return fmt.Errorf("invalid to date format: %w", err)
+	}
+
+	fromTime := toTime.AddDate(-10, 0, 0)
+	fromDate := fromTime.Format("20060102")
+
+	fmt.Printf("Fetching 10 years of daily data from %s to %s for %d symbols\n", fromDate, toDate, len(symbols))
+
+	// Create rate limiter for cross-service call rate limiting
+	rateLimiter := &rateLimiter{}
+	
+	successCount := 0
+	errorCount := 0
+
+	for i, symbol := range symbols {
+		rateLimiter.wait()
+		
+		fmt.Printf("Processing symbol %d/%d: %s\n", i+1, len(symbols), symbol)
+		
+		err := historicalService.FetchAndStoreDailyData(symbol, fromDate, toDate)
+		if err != nil {
+			fmt.Printf("Error fetching daily data for %s: %v\n", symbol, err)
+			errorCount++
+			continue
+		}
+		
+		successCount++
+		fmt.Printf("Successfully processed %s (%d/%d)\n", symbol, i+1, len(symbols))
+	}
+
+	fmt.Printf("Completed fetch-all-daily-data. Success: %d, Errors: %d\n", successCount, errorCount)
+	return nil
 }
 
 // loadSymbols reads symbols from a file
