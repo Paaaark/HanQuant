@@ -120,6 +120,17 @@ func splitDateRange(fromDate, toDate, dataType string) ([][]string, error) {
 		return nil, fmt.Errorf("invalid to date: %w", err)
 	}
 
+	// Check if the date range is valid
+	if from.After(to) {
+		return nil, fmt.Errorf("from date (%s) is after to date (%s)", fromDate, toDate)
+	}
+
+	// Check if we're trying to fetch future data
+	now := time.Now()
+	if from.After(now) {
+		return nil, fmt.Errorf("from date (%s) is in the future", fromDate)
+	}
+
 	var chunks [][]string
 	var chunkSize int
 	var overlap int
@@ -133,6 +144,37 @@ func splitDateRange(fromDate, toDate, dataType string) ([][]string, error) {
 		overlap = 10    // 10 minutes overlap
 	default:
 		return nil, fmt.Errorf("unsupported data type: %s", dataType)
+	}
+
+	// For very small date ranges, we need to be more careful
+	daysDiff := int(to.Sub(from).Hours() / 24)
+	if daysDiff <= chunkSize {
+		// For small ranges, we still want to ensure we have enough days to potentially contain trading data
+		// A 2-day range might not contain any trading days, so we need to be more conservative
+		if daysDiff < 7 {
+			// For very small ranges (less than a week), expand to at least 7 days to ensure we have trading days
+			expandedFrom := from.AddDate(0, 0, -3) // Go back 3 days
+			expandedTo := to.AddDate(0, 0, 3)      // Go forward 3 days
+			
+			// But don't go into the future
+			now := time.Now()
+			if expandedTo.After(now) {
+				expandedTo = now
+			}
+			
+			chunks = append(chunks, []string{
+				formatDate(expandedFrom),
+				formatDate(expandedTo),
+			})
+			return chunks, nil
+		} else {
+			// For ranges 7+ days, use as-is
+			chunks = append(chunks, []string{
+				formatDate(from),
+				formatDate(to),
+			})
+			return chunks, nil
+		}
 	}
 
 	current := from
@@ -157,33 +199,29 @@ func splitDateRange(fromDate, toDate, dataType string) ([][]string, error) {
 // FetchAndStoreDailyData fetches daily stock data from KIS API and stores it in S3
 // Now includes intelligent fetching, rate limiting, and pagination
 func (s *HistoricalService) FetchAndStoreDailyData(symbol, fromDate, toDate string) error {
-	// Check existing data to avoid redundant fetches
-	latestExisting, err := s.getLatestDateFromS3(symbol, "daily")
+	return s.FetchAndStoreDailyDataWithHeuristics(symbol, fromDate, toDate)
+}
+
+// FetchAndStoreDailyDataWithHeuristics uses intelligent heuristics to determine what data to fetch
+func (s *HistoricalService) FetchAndStoreDailyDataWithHeuristics(symbol, fromDate, toDate string) error {
+	// Check existing data completeness
+	isComplete, recordCount, err := s.CheckDataCompleteness(symbol, fromDate, toDate)
 	if err != nil {
-		return fmt.Errorf("failed to check existing data: %w", err)
+		return fmt.Errorf("failed to check data completeness: %w", err)
 	}
 
-	// If we have existing data, only fetch from the latest date onwards
-	if latestExisting != "" {
-		latestTime, err := parseDate(latestExisting)
-		if err != nil {
-			return fmt.Errorf("failed to parse latest date: %w", err)
-		}
-		
-		requestedFrom, err := parseDate(fromDate)
-		if err != nil {
-			return fmt.Errorf("failed to parse from date: %w", err)
-		}
-		
-		// If the latest existing data is newer than our requested from date,
-		// adjust the from date to avoid redundant fetches
-		if latestTime.After(requestedFrom) {
-			fromDate = formatDate(latestTime.AddDate(0, 0, 1)) // Start from next day
-			fmt.Printf("Adjusted from date to %s (latest existing: %s)\n", fromDate, latestExisting)
-		}
+	if isComplete {
+		fmt.Printf("Data for %s is already complete (%d records), skipping fetch\n", symbol, recordCount)
+		return nil
 	}
 
-	// If fromDate is after toDate, we already have all the data
+	// Load existing data to determine what we need to fetch
+	existingData, err := s.s3Storage.LoadDailyData(symbol)
+	if err != nil && !strings.Contains(err.Error(), "NoSuchKey") {
+		return fmt.Errorf("failed to load existing data: %w", err)
+	}
+
+	// Parse date range
 	from, err := parseDate(fromDate)
 	if err != nil {
 		return fmt.Errorf("invalid from date: %w", err)
@@ -193,68 +231,251 @@ func (s *HistoricalService) FetchAndStoreDailyData(symbol, fromDate, toDate stri
 	if err != nil {
 		return fmt.Errorf("invalid to date: %w", err)
 	}
+
+	// Check for future dates and adjust if necessary
+	now := time.Now()
+	if from.After(now) {
+		fmt.Printf("Warning: From date %s is in the future, adjusting to today\n", fromDate)
+		from = now
+	}
+	if to.After(now) {
+		fmt.Printf("Warning: To date %s is in the future, adjusting to today\n", toDate)
+		to = now
+	}
 	
-	if from.After(to) {
-		fmt.Printf("No new data to fetch for %s (from: %s, to: %s)\n", symbol, fromDate, toDate)
+	// Don't try to fetch data for today if it's a weekend
+	weekday := now.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		fmt.Printf("Today is %s (weekend), adjusting to previous Friday\n", weekday)
+		// Adjust to previous Friday
+		daysToSubtract := int(weekday - time.Friday)
+		if daysToSubtract < 0 {
+			daysToSubtract += 7
+		}
+		adjustedDate := now.AddDate(0, 0, -daysToSubtract)
+		if from.Equal(now) {
+			from = adjustedDate
+		}
+		if to.Equal(now) {
+			to = adjustedDate
+		}
+	}
+
+	// Determine what date ranges we need to fetch
+	neededRanges := s.determineNeededDateRanges(existingData, from, to)
+	
+	fmt.Printf("Debug: Determined %d ranges for %s (adjusted from: %s, to: %s)\n", 
+		len(neededRanges), symbol, formatDate(from), formatDate(to))
+	
+	if len(neededRanges) == 0 {
+		fmt.Printf("No new data needed for %s (from: %s, to: %s)\n", symbol, fromDate, toDate)
 		return nil
 	}
 
-	// Split date range into chunks
-	chunks, err := splitDateRange(fromDate, toDate, "daily")
-	if err != nil {
-		return fmt.Errorf("failed to split date range: %w", err)
-	}
+	fmt.Printf("Fetching data for %s in %d ranges: %d existing records\n", symbol, len(neededRanges), len(existingData))
 
+	// Fetch data for each needed range (from newest to oldest)
 	rateLimiter := &rateLimiter{}
-	var allData data.SlicePriceStruct
+	var allNewData data.SlicePriceStruct
+	reachedEndOfData := false
 
-	fmt.Printf("Fetching daily data for %s in %d chunks...\n", symbol, len(chunks))
-
-	for i, chunk := range chunks {
-		rateLimiter.wait()
-		
-		fmt.Printf("Chunk %d/%d: %s to %s\n", i+1, len(chunks), chunk[0], chunk[1])
-		
-		// Fetch data from KIS API with retry logic for rate limiting
-		var dailyData data.SlicePriceStruct
-		var err error
-		maxRetries := 3
-		
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			dailyData, err = s.kisClient.GetDailyStockData(symbol, chunk[0], chunk[1])
-			if err == nil {
-				break // Success, exit retry loop
-			}
-			
-			if isRateLimitError(err) {
-				fmt.Printf("Rate limit error in chunk %d/%d: %v\n", i+1, len(chunks), err)
-				if attempt < maxRetries-1 {
-					handleRateLimitError(err, attempt)
-					continue // Retry
-				}
-			}
-			
-			// Non-rate-limit error or max retries reached
-			return fmt.Errorf("failed to fetch daily data for %s (%s-%s): %w", symbol, chunk[0], chunk[1], err)
+	for i, dateRange := range neededRanges {
+		if reachedEndOfData {
+			fmt.Printf("Skipping remaining ranges for %s (reached end of historical data)\n", symbol)
+			break
 		}
 
-		allData = append(allData, dailyData...)
-		fmt.Printf("Received %d daily records for chunk %d\n", len(dailyData), i+1)
+		rateLimiter.wait()
+		
+		fmt.Printf("Range %d/%d: %s to %s\n", i+1, len(neededRanges), 
+			formatDate(dateRange.start), formatDate(dateRange.end))
+		
+		// Split range into chunks
+		chunks, err := splitDateRange(formatDate(dateRange.start), formatDate(dateRange.end), "daily")
+		if err != nil {
+			return fmt.Errorf("failed to split date range: %w", err)
+		}
+
+		// Fetch data for each chunk
+		for j, chunk := range chunks {
+			rateLimiter.wait()
+			
+			fmt.Printf("  Chunk %d/%d: %s to %s\n", j+1, len(chunks), chunk[0], chunk[1])
+			
+			// Fetch data from KIS API with retry logic for rate limiting
+			var dailyData data.SlicePriceStruct
+			maxRetries := 3
+			
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				dailyData, err = s.kisClient.GetDailyStockData(symbol, chunk[0], chunk[1])
+				if err == nil {
+					break // Success, exit retry loop
+				}
+				
+				if isRateLimitError(err) {
+					fmt.Printf("Rate limit error in chunk %d/%d: %v\n", j+1, len(chunks), err)
+					if attempt < maxRetries-1 {
+						handleRateLimitError(err, attempt)
+						continue // Retry
+					}
+				}
+				
+				// Non-rate-limit error or max retries reached
+				return fmt.Errorf("failed to fetch daily data for %s (%s-%s): %w", symbol, chunk[0], chunk[1], err)
+			}
+
+			allNewData = append(allNewData, dailyData...)
+			fmt.Printf("  Received %d daily records for chunk %d\n", len(dailyData), j+1)
+
+			// If the chunk returned 0 records, check if this is likely the end of historical data
+			if len(dailyData) == 0 {
+				// Check if this chunk is in the past (not future dates)
+				chunkFrom, _ := parseDate(chunk[0])
+				chunkTo, _ := parseDate(chunk[1])
+				now := time.Now()
+				
+				// Calculate the size of this chunk
+				chunkDays := int(chunkTo.Sub(chunkFrom).Hours() / 24)
+				
+				// If the chunk is in the past and returns 0 records, we need to be more careful
+				if chunkFrom.Before(now) && chunkTo.Before(now) {
+					// Only terminate if the chunk is large enough (at least 7 days) and still returns 0
+					// Small chunks might just not contain trading days
+					if chunkDays >= 7 {
+						fmt.Printf("Chunk %d/%d returned 0 records for past dates (%s-%s, %d days), reached end of historical data for %s\n", 
+							j+1, len(chunks), chunk[0], chunk[1], chunkDays, symbol)
+						reachedEndOfData = true
+						break // Exit the chunk loop for this date range
+					} else {
+						fmt.Printf("Chunk %d/%d returned 0 records for small past range (%s-%s, %d days), might be no trading days, continuing\n", 
+							j+1, len(chunks), chunk[0], chunk[1], chunkDays)
+						// Don't terminate for small chunks, they might just not contain trading days
+					}
+				} else if chunkFrom.After(now) || chunkTo.After(now) {
+					fmt.Printf("Chunk %d/%d returned 0 records for future dates (%s-%s), skipping\n", 
+						j+1, len(chunks), chunk[0], chunk[1])
+					// Don't set reachedEndOfData for future dates, just continue
+				} else {
+					// This is today's date or very recent, 0 records might be normal
+					fmt.Printf("Chunk %d/%d returned 0 records for recent dates (%s-%s), continuing\n", 
+						j+1, len(chunks), chunk[0], chunk[1])
+				}
+			}
+		}
 	}
 
-	if len(allData) == 0 {
-		fmt.Printf("No daily data received for %s\n", symbol)
+	if len(allNewData) == 0 {
+		fmt.Printf("No new daily data received for %s\n", symbol)
 		return nil
 	}
 
 	// Merge with existing data and store in S3
-	err = s.s3Storage.MergeAndStoreData(symbol, allData, "daily")
+	err = s.s3Storage.MergeAndStoreData(symbol, allNewData, "daily")
 	if err != nil {
 		return fmt.Errorf("failed to store daily data for %s: %w", symbol, err)
 	}
 
-	fmt.Printf("Successfully stored %d daily records for %s\n", len(allData), symbol)
+	fmt.Printf("Successfully stored %d new daily records for %s\n", len(allNewData), symbol)
 	return nil
+}
+
+// dateRange represents a date range for fetching
+type dateRange struct {
+	start time.Time
+	end   time.Time
+}
+
+// determineNeededDateRanges analyzes existing data and determines what date ranges need to be fetched
+// Returns ranges from newest to oldest to optimize for early termination when no more data exists
+func (s *HistoricalService) determineNeededDateRanges(existingData data.SlicePriceStruct, from, to time.Time) []dateRange {
+	// Don't fetch future data
+	now := time.Now()
+	if from.After(now) {
+		fmt.Printf("Adjusting from date from %s to %s (future date)\n", formatDate(from), formatDate(now))
+		from = now
+	}
+	if to.After(now) {
+		fmt.Printf("Adjusting to date from %s to %s (future date)\n", formatDate(to), formatDate(now))
+		to = now
+	}
+	
+	// If the adjusted range is invalid, return empty
+	if from.After(to) {
+		fmt.Printf("Adjusted date range is invalid (%s to %s), returning empty ranges\n", formatDate(from), formatDate(to))
+		return []dateRange{}
+	}
+	
+	if len(existingData) == 0 {
+		// No existing data, fetch the entire range (newest to oldest)
+		// But don't fetch if the range is too small (less than 1 day)
+		daysDiff := int(to.Sub(from).Hours() / 24)
+		if daysDiff < 1 {
+			fmt.Printf("Date range is too small (%d days), skipping\n", daysDiff)
+			return []dateRange{}
+		}
+		return []dateRange{{start: from, end: to}}
+	}
+
+	// Sort existing data by date
+	sort.Slice(existingData, func(i, j int) bool {
+		return existingData[i].Date < existingData[j].Date
+	})
+
+	// Create a map of existing dates for quick lookup
+	existingDates := make(map[string]bool)
+	for _, record := range existingData {
+		existingDates[record.Date] = true
+	}
+
+	var neededRanges []dateRange
+	current := from
+
+	// Scan through the date range and identify gaps
+	for current.Before(to) || current.Equal(to) {
+		// Find the next gap
+		gapStart := current
+		
+		// Find where the gap ends (where we have data again)
+		for current.Before(to) || current.Equal(to) {
+			currentDateStr := formatDate(current)
+			if existingDates[currentDateStr] {
+				break // We have data for this date
+			}
+			current = current.AddDate(0, 0, 1)
+		}
+		
+		// If we found a gap, add it to needed ranges
+		if gapStart.Before(current) {
+			gapEnd := current.AddDate(0, 0, -1) // Back up one day since current is the first date with data
+			daysDiff := int(gapEnd.Sub(gapStart).Hours() / 24)
+			
+			// Only add gaps that are at least 3 days long to ensure they might contain trading days
+			if daysDiff >= 3 {
+				neededRanges = append(neededRanges, dateRange{
+					start: gapStart,
+					end:   gapEnd,
+				})
+			} else {
+				fmt.Printf("Skipping small gap: %s to %s (%d days) - too small to contain trading days\n", formatDate(gapStart), formatDate(gapEnd), daysDiff)
+			}
+		}
+		
+		// Skip over existing data
+		for current.Before(to) || current.Equal(to) {
+			currentDateStr := formatDate(current)
+			if !existingDates[currentDateStr] {
+				break // Found next gap
+			}
+			current = current.AddDate(0, 0, 1)
+		}
+	}
+
+	// Reverse the order to fetch from newest to oldest
+	for i, j := 0, len(neededRanges)-1; i < j; i, j = i+1, j-1 {
+		neededRanges[i], neededRanges[j] = neededRanges[j], neededRanges[i]
+	}
+
+	return neededRanges
 }
 
 // FetchAndStoreMinuteData fetches minute-by-minute stock data from KIS API and stores it in S3
@@ -361,6 +582,56 @@ func (s *HistoricalService) GetDateRangeForPeriod(period string) (string, string
 	}
 }
 
+// CheckDataCompleteness checks if a symbol has sufficient data coverage
+func (s *HistoricalService) CheckDataCompleteness(symbol, fromDate, toDate string) (bool, int, error) {
+	// Load existing data
+	existingData, err := s.s3Storage.LoadDailyData(symbol)
+	if err != nil {
+		if strings.Contains(err.Error(), "NoSuchKey") {
+			return false, 0, nil // No data exists
+		}
+		return false, 0, fmt.Errorf("failed to load data for %s: %w", symbol, err)
+	}
+
+	if len(existingData) == 0 {
+		return false, 0, nil
+	}
+
+	// Parse date range
+	from, err := parseDate(fromDate)
+	if err != nil {
+		return false, 0, fmt.Errorf("invalid from date: %w", err)
+	}
+	
+	to, err := parseDate(toDate)
+	if err != nil {
+		return false, 0, fmt.Errorf("invalid to date: %w", err)
+	}
+
+	// Count records within the date range
+	count := 0
+	for _, record := range existingData {
+		recordTime, err := parseDate(record.Date)
+		if err != nil {
+			continue
+		}
+		
+		if (recordTime.After(from) || recordTime.Equal(from)) && 
+		   (recordTime.Before(to) || recordTime.Equal(to)) {
+			count++
+		}
+	}
+
+	// Calculate expected number of trading days (roughly 252 per year)
+	daysDiff := int(to.Sub(from).Hours() / 24)
+	expectedTradingDays := int(float64(daysDiff) * 0.7) // Rough estimate: 70% of calendar days are trading days
+
+	// Consider data complete if we have at least 80% of expected trading days
+	isComplete := count >= int(float64(expectedTradingDays)*0.8)
+	
+	return isComplete, count, nil
+}
+
 // BulkFetchDailyData fetches daily data for multiple symbols
 func (s *HistoricalService) BulkFetchDailyData(symbols []string) error {
 	fromDate, toDate, err := s.GetDateRangeForPeriod("5years")
@@ -370,18 +641,47 @@ func (s *HistoricalService) BulkFetchDailyData(symbols []string) error {
 
 	rateLimiter := &rateLimiter{}
 	
+	successCount := 0
+	errorCount := 0
+	incompleteCount := 0
+
 	for i, symbol := range symbols {
 		rateLimiter.wait()
 		
 		fmt.Printf("Fetching daily data for %s (%d/%d)...\n", symbol, i+1, len(symbols))
-		err := s.FetchAndStoreDailyData(symbol, fromDate, toDate)
+		
+		// Check if data is already complete
+		isComplete, recordCount, err := s.CheckDataCompleteness(symbol, fromDate, toDate)
 		if err != nil {
-			fmt.Printf("Error fetching daily data for %s: %v\n", symbol, err)
+			fmt.Printf("Warning: Could not check data completeness for %s: %v\n", symbol, err)
+		} else if isComplete {
+			fmt.Printf("Data for %s is already complete (%d records), skipping\n", symbol, recordCount)
+			successCount++
 			continue
 		}
+		
+		err = s.FetchAndStoreDailyData(symbol, fromDate, toDate)
+		if err != nil {
+			fmt.Printf("Error fetching daily data for %s: %v\n", symbol, err)
+			errorCount++
+			continue
+		}
+		
+		// Check if data is now complete
+		isComplete, recordCount, err = s.CheckDataCompleteness(symbol, fromDate, toDate)
+		if err != nil {
+			fmt.Printf("Warning: Could not verify data completeness for %s: %v\n", symbol, err)
+		} else if !isComplete {
+			fmt.Printf("Warning: Data for %s may be incomplete (%d records)\n", symbol, recordCount)
+			incompleteCount++
+		}
+		
+		successCount++
 		fmt.Printf("Successfully fetched daily data for %s\n", symbol)
 	}
 
+	fmt.Printf("Completed bulk daily data fetch. Success: %d, Errors: %d, Incomplete: %d\n", 
+		successCount, errorCount, incompleteCount)
 	return nil
 }
 
@@ -406,5 +706,97 @@ func (s *HistoricalService) BulkFetchMinuteData(symbols []string) error {
 		fmt.Printf("Successfully fetched minute data for %s\n", symbol)
 	}
 
+	return nil
+}
+
+// FetchAndStoreTodayData fetches today's data for multiple symbols using GetMultipleStockSnapshot
+// This is more efficient than individual API calls as it can fetch 30 symbols at once
+func (s *HistoricalService) FetchAndStoreTodayData(symbols []string, targetDate string) error {
+	rateLimiter := &rateLimiter{}
+	
+	// Process symbols in batches of 30 (KIS API limit for GetMultipleStockSnapshot)
+	batchSize := 30
+	totalBatches := (len(symbols) + batchSize - 1) / batchSize
+	
+	fmt.Printf("Processing %d symbols in %d batches of %d symbols each\n", len(symbols), totalBatches, batchSize)
+	
+	successCount := 0
+	errorCount := 0
+	skippedCount := 0
+	
+	for batchIndex := 0; batchIndex < totalBatches; batchIndex++ {
+		start := batchIndex * batchSize
+		end := start + batchSize
+		if end > len(symbols) {
+			end = len(symbols)
+		}
+		
+		batchSymbols := symbols[start:end]
+		
+		rateLimiter.wait()
+		
+		fmt.Printf("Processing batch %d/%d: symbols %d-%d (%d symbols)\n", 
+			batchIndex+1, totalBatches, start+1, end, len(batchSymbols))
+		
+		// Fetch snapshot data for this batch
+		snapshots, err := s.kisClient.GetMultipleStockSnapshot(batchSymbols)
+		if err != nil {
+			fmt.Printf("Error fetching snapshot for batch %d: %v\n", batchIndex+1, err)
+			errorCount += len(batchSymbols)
+			continue
+		}
+		
+		fmt.Printf("Received %d snapshots for batch %d\n", len(snapshots), batchIndex+1)
+		
+		// Convert snapshots to daily data format and store each symbol
+		for _, snapshot := range snapshots {
+			// Check if we already have data for this date
+			existingData, err := s.s3Storage.LoadDailyData(snapshot.Code)
+			if err == nil {
+				// Check if we already have data for the target date
+				hasDataForDate := false
+				for _, record := range existingData {
+					if record.Date == targetDate {
+						hasDataForDate = true
+						break
+					}
+				}
+				
+				if hasDataForDate {
+					fmt.Printf("Data for %s on %s already exists, skipping\n", snapshot.Code, targetDate)
+					skippedCount++
+					continue
+				}
+			}
+			
+			// Convert StockSnapshot to PriceStruct
+			dailyData := data.PriceStruct{
+				Date:     targetDate,
+				Open:     snapshot.Open,
+				High:     snapshot.High,
+				Low:      snapshot.Low,
+				Close:    snapshot.Price, // Current price is the close price for today
+				Volume:   snapshot.Volume,
+				Duration: "D",
+			}
+			
+			// Create a slice with single daily record
+			dailySlice := data.SlicePriceStruct{dailyData}
+			
+			// Store to S3
+			err = s.s3Storage.MergeAndStoreData(snapshot.Code, dailySlice, "daily")
+			if err != nil {
+				fmt.Printf("Error storing data for %s: %v\n", snapshot.Code, err)
+				errorCount++
+				continue
+			}
+			
+			successCount++
+			fmt.Printf("Successfully stored today's data for %s (%s)\n", snapshot.Code, snapshot.Name)
+		}
+	}
+	
+	fmt.Printf("Completed FetchAndStoreTodayData. Success: %d, Skipped: %d, Errors: %d\n", 
+		successCount, skippedCount, errorCount)
 	return nil
 } 

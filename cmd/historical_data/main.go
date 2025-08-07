@@ -44,6 +44,22 @@ func main() {
 
 	// Validate required flags
 	if *action == "" {
+		fmt.Println("Historical Data Management Tool")
+		fmt.Println("")
+		fmt.Println("Available actions:")
+		fmt.Println("  fetch-all-daily-data        - Fetch 10 years of daily data for all symbols")
+		fmt.Println("  fetch-all-daily-data-today  - Fetch today's daily data for all symbols (efficient)")
+		fmt.Println("  fetch-daily                 - Fetch daily data for a single symbol")
+		fmt.Println("  fetch-minute                - Fetch minute data for a single symbol")
+		fmt.Println("  load-daily                  - Load daily data from S3")
+		fmt.Println("  load-minute                 - Load minute data from S3")
+		fmt.Println("  bulk-daily                  - Bulk fetch daily data for multiple symbols")
+		fmt.Println("  bulk-minute                 - Bulk fetch minute data for multiple symbols")
+		fmt.Println("")
+		fmt.Println("Example usage:")
+		fmt.Println("  ./historical_data -action fetch-all-daily-data-today -to 20241231")
+		fmt.Println("  ./historical_data -action fetch-daily -symbol 005930 -from 20240101 -to 20241231")
+		fmt.Println("")
 		log.Fatal("Action is required. Use -action flag.")
 	}
 
@@ -144,6 +160,16 @@ func main() {
 		}
 		fmt.Println("Successfully completed fetch-all-daily-data")
 
+	case "fetch-all-daily-data-today":
+		if *toDate == "" {
+			log.Fatal("To date is required for fetch-all-daily-data-today action")
+		}
+		err := fetchAllDailyDataToday(historicalService, *toDate)
+		if err != nil {
+			log.Fatalf("Failed to fetch all daily data for today: %v", err)
+		}
+		fmt.Println("Successfully completed fetch-all-daily-data-today")
+
 	default:
 		log.Fatalf("Unknown action: %s", *action)
 	}
@@ -203,18 +229,21 @@ func fetchAllDailyData(historicalService *service.HistoricalService, toDate stri
 	fromDate := fromTime.Format("20060102")
 
 	fmt.Printf("Fetching 10 years of daily data from %s to %s for %d symbols\n", fromDate, toDate, len(symbols))
+	fmt.Printf("Using intelligent heuristics to fetch only missing data gaps\n")
 
 	// Create rate limiter for cross-service call rate limiting
 	rateLimiter := &rateLimiter{}
 	
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	for i, symbol := range symbols {
 		rateLimiter.wait()
 		
 		fmt.Printf("Processing symbol %d/%d: %s\n", i+1, len(symbols), symbol)
 		
+		// Use intelligent heuristics to fetch only missing data
 		err := historicalService.FetchAndStoreDailyData(symbol, fromDate, toDate)
 		if err != nil {
 			fmt.Printf("Error fetching daily data for %s: %v\n", symbol, err)
@@ -222,11 +251,41 @@ func fetchAllDailyData(historicalService *service.HistoricalService, toDate stri
 			continue
 		}
 		
-		successCount++
-		fmt.Printf("Successfully processed %s (%d/%d)\n", symbol, i+1, len(symbols))
+		// Check if data was actually fetched or skipped
+		isComplete, recordCount, checkErr := historicalService.CheckDataCompleteness(symbol, fromDate, toDate)
+		if checkErr != nil {
+			fmt.Printf("Warning: Could not verify data completeness for %s: %v\n", symbol, checkErr)
+		} else if isComplete {
+			skippedCount++
+			fmt.Printf("Data for %s is complete (%d records), no fetch needed\n", symbol, recordCount)
+		} else {
+			successCount++
+			fmt.Printf("Successfully processed %s (%d/%d)\n", symbol, i+1, len(symbols))
+		}
 	}
 
-	fmt.Printf("Completed fetch-all-daily-data. Success: %d, Errors: %d\n", successCount, errorCount)
+	fmt.Printf("Completed fetch-all-daily-data. Success: %d, Skipped: %d, Errors: %d\n", 
+		successCount, skippedCount, errorCount)
+	return nil
+}
+
+// fetchAllDailyDataToday fetches today's daily data for all stock symbols using GetMultipleStockSnapshot
+func fetchAllDailyDataToday(historicalService *service.HistoricalService, targetDate string) error {
+	// Load all stock symbols from CSV
+	symbols, err := loadStockSymbolsFromCSV()
+	if err != nil {
+		return fmt.Errorf("failed to load stock symbols: %w", err)
+	}
+
+	fmt.Printf("Loaded %d stock symbols from stock_listings.csv\n", len(symbols))
+	fmt.Printf("Fetching today's daily data for %s for %d symbols\n", targetDate, len(symbols))
+
+	// Use the new efficient method that fetches 30 symbols at once
+	err = historicalService.FetchAndStoreTodayData(symbols, targetDate)
+	if err != nil {
+		return fmt.Errorf("failed to fetch today's data: %w", err)
+	}
+
 	return nil
 }
 

@@ -28,6 +28,7 @@ func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
 	}
 
     symbol := parts[3]
@@ -37,8 +38,25 @@ func (h *StockHandler) GetRecentPrice(w http.ResponseWriter, r *http.Request) {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
+    
+    // Convert result to JSON
+    var jsonData []byte
+    var marshalErr error
+    
+    // Try to use EncodeJSON method if available
+    if sliceData, ok := result.(interface{ EncodeJSON() []byte }); ok {
+        jsonData = sliceData.EncodeJSON()
+    } else {
+        // Fallback to standard JSON marshaling
+        jsonData, marshalErr = json.Marshal(result)
+        if marshalErr != nil {
+            http.Error(w, "failed to marshal response", http.StatusInternalServerError)
+            return
+        }
+    }
+    
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    w.Write(result.EncodeJSON())
+    w.Write(jsonData)
 }
 
 func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +73,12 @@ func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request
     to := r.URL.Query().Get("to")
     duration := r.URL.Query().Get("duration")
 
-    if symbol == "" || from == "" || to == "" || duration == "" {
-        http.Error(w, "missing query parameters", http.StatusBadRequest)
+	fmt.Println("from: ", from)
+	fmt.Println("to: ", to)
+	fmt.Println("duration: ", duration)
+
+    if symbol == "" {
+        http.Error(w, "missing stock symbol", http.StatusBadRequest)
         return
     }
 
@@ -66,8 +88,24 @@ func (h *StockHandler) GetHistoricalPrice(w http.ResponseWriter, r *http.Request
         return
     }
 
+    // Convert result to JSON
+    var jsonData []byte
+    var marshalErr error
+    
+    // Try to use EncodeJSON method if available
+    if sliceData, ok := result.(interface{ EncodeJSON() []byte }); ok {
+        jsonData = sliceData.EncodeJSON()
+    } else {
+        // Fallback to standard JSON marshaling
+        jsonData, marshalErr = json.Marshal(result)
+        if marshalErr != nil {
+            http.Error(w, "failed to marshal response", http.StatusInternalServerError)
+            return
+        }
+    }
+
     w.Header().Set("Content-Type", "application/json")
-    w.Write(result.EncodeJSON())
+    w.Write(jsonData)
 }
 
 func (h *StockHandler) GetTopFluctuationStocks(w http.ResponseWriter, r *http.Request) {
