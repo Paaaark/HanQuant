@@ -36,6 +36,10 @@ func NewHTTPServer() http.Handler {
 	
 	apiHandler := handler.NewStockHandler(stockService, db)
 
+	// Initialize backtesting service and handler
+	backtestService := service.NewBacktestService(stockService)
+	backtestHandler := handler.NewBacktestHandler(backtestService)
+
 	wsService := service.NewWebSocketService(kisClient)
 	wsHandler := handler.NewWebSocketHandler(wsService)
 	wsService.Start()
@@ -89,6 +93,9 @@ func NewHTTPServer() http.Handler {
 	mux.HandleFunc("/ranking/market-cap", apiHandler.GetTopMarketCapStocks)
 	mux.HandleFunc("/snapshot/multstock", apiHandler.GetMultipleStockSnapshot)
 	mux.HandleFunc("/index/", apiHandler.GetIndexPrice)
+
+	// --- Backtesting endpoints ---
+	mux.HandleFunc("/backtest/sma", backtestHandler.RunSMABacktest)
 
 	return mux
 }
