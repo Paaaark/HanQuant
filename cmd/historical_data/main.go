@@ -32,13 +32,10 @@ func (rl *rateLimiter) wait() {
 func main() {
 	// Define command line flags
 	var (
-		action     = flag.String("action", "", "Action to perform: fetch-daily, fetch-minute, load-daily, load-minute, bulk-daily, bulk-minute, fetch-all-daily-data")
+		action     = flag.String("action", "", "Action to perform: fetch-daily, fetch-daily-today, fetch-minute, fetch-minute-today")
 		symbol     = flag.String("symbol", "", "Stock symbol (e.g., 005930)")
 		fromDate   = flag.String("from", "", "Start date (YYYYMMDD format)")
 		toDate     = flag.String("to", "", "End date (YYYYMMDD format)")
-		yearMonth  = flag.String("month", "", "Year and month for minute data (YYYYMM format)")
-		symbolsFile = flag.String("symbols", "", "File containing list of symbols (one per line)")
-		outputFile = flag.String("output", "", "Output file for data (JSON format)")
 	)
 	flag.Parse()
 
@@ -47,17 +44,13 @@ func main() {
 		fmt.Println("Historical Data Management Tool")
 		fmt.Println("")
 		fmt.Println("Available actions:")
-		fmt.Println("  fetch-all-daily-data        - Fetch 10 years of daily data for all symbols")
-		fmt.Println("  fetch-all-daily-data-today  - Fetch today's daily data for all symbols (efficient)")
-		fmt.Println("  fetch-daily                 - Fetch daily data for a single symbol")
-		fmt.Println("  fetch-minute                - Fetch minute data for a single symbol")
-		fmt.Println("  load-daily                  - Load daily data from S3")
-		fmt.Println("  load-minute                 - Load minute data from S3")
-		fmt.Println("  bulk-daily                  - Bulk fetch daily data for multiple symbols")
-		fmt.Println("  bulk-minute                 - Bulk fetch minute data for multiple symbols")
+		fmt.Println("  fetch-daily        - Fetch 10 years of daily data for all symbols")
+		fmt.Println("  fetch-daily-today  - Fetch today's daily data for all symbols (efficient)")
+		fmt.Println("  fetch-minute       - Fetch minute data for a single symbol")
+		fmt.Println("  fetch-minute-today - Fetch minute data for a single symbol")
 		fmt.Println("")
 		fmt.Println("Example usage:")
-		fmt.Println("  ./historical_data -action fetch-all-daily-data-today -to 20241231")
+		fmt.Println("  ./historical_data -action fetch-daily -to 20241231")
 		fmt.Println("  ./historical_data -action fetch-daily -symbol 005930 -from 20240101 -to 20241231")
 		fmt.Println("")
 		log.Fatal("Action is required. Use -action flag.")
@@ -89,10 +82,28 @@ func main() {
 	// Execute action
 	switch *action {
 	case "fetch-daily":
-		if *symbol == "" || *fromDate == "" || *toDate == "" {
-			log.Fatal("Symbol, from date, and to date are required for fetch-daily action")
+		if *toDate == "" {
+			today := time.Now().Format("20060102")
+			toDate = &today
 		}
-		err := historicalService.FetchAndStoreDailyData(*symbol, *fromDate, *toDate)
+		if *fromDate == "" {
+			toTime, err := time.Parse("20060102", *toDate)
+			if err != nil {
+				log.Fatal("Invalid to date format: ", err)
+			}
+			toTimeStr := toTime.AddDate(-10, 0, 0).Format("20060102")
+			fromDate = &toTimeStr
+		}
+		if *fromDate > *toDate {
+			log.Fatal("From date is after to date: FromDate: ", *fromDate, " ToDate: ", *toDate)
+		}
+		var err error
+		if *symbol == "" {
+			err = fetchDailyAll(historicalService, *toDate, *fromDate);
+		} else {
+			err = historicalService.FetchAndStoreDailyData(*symbol, *fromDate, *toDate)
+		}
+
 		if err != nil {
 			log.Fatalf("Failed to fetch daily data: %v", err)
 		}
@@ -108,59 +119,7 @@ func main() {
 		}
 		fmt.Printf("Successfully fetched and stored minute data for %s\n", *symbol)
 
-	case "load-daily":
-		if *symbol == "" {
-			log.Fatal("Symbol is required for load-daily action")
-		}
-		data, err := historicalService.LoadDailyData(*symbol)
-		if err != nil {
-			log.Fatalf("Failed to load daily data: %v", err)
-		}
-		outputData(data, *outputFile)
-
-	case "load-minute":
-		if *symbol == "" || *yearMonth == "" {
-			log.Fatal("Symbol and month are required for load-minute action")
-		}
-		data, err := historicalService.LoadMinuteData(*symbol, *yearMonth)
-		if err != nil {
-			log.Fatalf("Failed to load minute data: %v", err)
-		}
-		outputData(data, *outputFile)
-
-	case "bulk-daily":
-		symbols, err := loadSymbols(*symbolsFile)
-		if err != nil {
-			log.Fatalf("Failed to load symbols: %v", err)
-		}
-		err = historicalService.BulkFetchDailyData(symbols)
-		if err != nil {
-			log.Fatalf("Failed to bulk fetch daily data: %v", err)
-		}
-		fmt.Println("Successfully completed bulk daily data fetch")
-
-	case "bulk-minute":
-		symbols, err := loadSymbols(*symbolsFile)
-		if err != nil {
-			log.Fatalf("Failed to load symbols: %v", err)
-		}
-		err = historicalService.BulkFetchMinuteData(symbols)
-		if err != nil {
-			log.Fatalf("Failed to bulk fetch minute data: %v", err)
-		}
-		fmt.Println("Successfully completed bulk minute data fetch")
-
-	case "fetch-all-daily-data":
-		if *toDate == "" {
-			log.Fatal("To date is required for fetch-all-daily-data action")
-		}
-		err := fetchAllDailyData(historicalService, *toDate)
-		if err != nil {
-			log.Fatalf("Failed to fetch all daily data: %v", err)
-		}
-		fmt.Println("Successfully completed fetch-all-daily-data")
-
-	case "fetch-all-daily-data-today":
+	case "fetch-daily-today":
 		if *toDate == "" {
 			log.Fatal("To date is required for fetch-all-daily-data-today action")
 		}
@@ -209,15 +168,13 @@ func loadStockSymbolsFromCSV() ([]string, error) {
 	return symbols, nil
 }
 
-// fetchAllDailyData fetches 10 years of daily data for all stock symbols
-func fetchAllDailyData(historicalService *service.HistoricalService, toDate string) error {
+// fetchDailyAll fetches 10 years of daily data for all stock symbols
+func fetchDailyAll(historicalService *service.HistoricalService, toDate string, fromDate string) error {
 	// Load all stock symbols from CSV
 	symbols, err := loadStockSymbolsFromCSV()
 	if err != nil {
 		return fmt.Errorf("failed to load stock symbols: %w", err)
 	}
-
-	fmt.Printf("Loaded %d stock symbols from stock_listings.csv\n", len(symbols))
 
 	// Parse toDate to calculate fromDate (10 years back)
 	toTime, err := time.Parse("20060102", toDate)
@@ -225,18 +182,17 @@ func fetchAllDailyData(historicalService *service.HistoricalService, toDate stri
 		return fmt.Errorf("invalid to date format: %w", err)
 	}
 
-	fromTime := toTime.AddDate(-10, 0, 0)
-	fromDate := fromTime.Format("20060102")
+	if fromDate == "" {
+		fromDate = toTime.AddDate(-10, 0, 0).Format("20060102")
+	}
 
 	fmt.Printf("Fetching 10 years of daily data from %s to %s for %d symbols\n", fromDate, toDate, len(symbols))
-	fmt.Printf("Using intelligent heuristics to fetch only missing data gaps\n")
 
 	// Create rate limiter for cross-service call rate limiting
 	rateLimiter := &rateLimiter{}
 	
 	successCount := 0
 	errorCount := 0
-	skippedCount := 0
 
 	for i, symbol := range symbols {
 		rateLimiter.wait()
@@ -252,20 +208,17 @@ func fetchAllDailyData(historicalService *service.HistoricalService, toDate stri
 		}
 		
 		// Check if data was actually fetched or skipped
-		isComplete, recordCount, checkErr := historicalService.CheckDataCompleteness(symbol, fromDate, toDate)
+		_, _, checkErr := historicalService.CheckDataCompleteness(symbol, fromDate, toDate)
 		if checkErr != nil {
 			fmt.Printf("Warning: Could not verify data completeness for %s: %v\n", symbol, checkErr)
-		} else if isComplete {
-			skippedCount++
-			fmt.Printf("Data for %s is complete (%d records), no fetch needed\n", symbol, recordCount)
 		} else {
 			successCount++
-			fmt.Printf("Successfully processed %s (%d/%d)\n", symbol, i+1, len(symbols))
+			fmt.Printf("\tSuccessfully processed %s (%d/%d)\n", symbol, i+1, len(symbols))
 		}
 	}
 
-	fmt.Printf("Completed fetch-all-daily-data. Success: %d, Skipped: %d, Errors: %d\n", 
-		successCount, skippedCount, errorCount)
+	fmt.Printf("Completed fetch-all-daily-data. Success: %d, Errors: %d\n", 
+		successCount, errorCount)
 	return nil
 }
 

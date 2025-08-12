@@ -67,12 +67,8 @@ func (s *StockService) GetHistoricalPrice(symbol, from, to, duration string) (in
 		duration = "D" // Default to daily
 	}
 
-	fmt.Printf("DEBUG: GetHistoricalPrice called for %s from %s to %s duration %s\n", symbol, from, to, duration)
-	fmt.Printf("DEBUG: S3 storage available: %v\n", s.s3Storage != nil)
-
 	// Try to get data from S3 first
 	if s.s3Storage != nil {
-		fmt.Printf("DEBUG: Attempting to get data from S3...\n")
 		data, err := s.getHistoricalDataFromS3(symbol, from, to, duration)
 		if err != nil {
 			fmt.Printf("DEBUG: S3 error: %v\n", err)

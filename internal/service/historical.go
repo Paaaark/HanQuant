@@ -196,14 +196,8 @@ func splitDateRange(fromDate, toDate, dataType string) ([][]string, error) {
 	return chunks, nil
 }
 
-// FetchAndStoreDailyData fetches daily stock data from KIS API and stores it in S3
-// Now includes intelligent fetching, rate limiting, and pagination
+// FetchAndStoreDailyData uses intelligent heuristics to determine what data to fetch
 func (s *HistoricalService) FetchAndStoreDailyData(symbol, fromDate, toDate string) error {
-	return s.FetchAndStoreDailyDataWithHeuristics(symbol, fromDate, toDate)
-}
-
-// FetchAndStoreDailyDataWithHeuristics uses intelligent heuristics to determine what data to fetch
-func (s *HistoricalService) FetchAndStoreDailyDataWithHeuristics(symbol, fromDate, toDate string) error {
 	// Check existing data completeness
 	isComplete, recordCount, err := s.CheckDataCompleteness(symbol, fromDate, toDate)
 	if err != nil {
@@ -242,37 +236,16 @@ func (s *HistoricalService) FetchAndStoreDailyDataWithHeuristics(symbol, fromDat
 		fmt.Printf("Warning: To date %s is in the future, adjusting to today\n", toDate)
 		to = now
 	}
-	
-	// Don't try to fetch data for today if it's a weekend
-	weekday := now.Weekday()
-	if weekday == time.Saturday || weekday == time.Sunday {
-		fmt.Printf("Today is %s (weekend), adjusting to previous Friday\n", weekday)
-		// Adjust to previous Friday
-		daysToSubtract := int(weekday - time.Friday)
-		if daysToSubtract < 0 {
-			daysToSubtract += 7
-		}
-		adjustedDate := now.AddDate(0, 0, -daysToSubtract)
-		if from.Equal(now) {
-			from = adjustedDate
-		}
-		if to.Equal(now) {
-			to = adjustedDate
-		}
-	}
 
 	// Determine what date ranges we need to fetch
 	neededRanges := s.determineNeededDateRanges(existingData, from, to)
-	
-	fmt.Printf("Debug: Determined %d ranges for %s (adjusted from: %s, to: %s)\n", 
-		len(neededRanges), symbol, formatDate(from), formatDate(to))
 	
 	if len(neededRanges) == 0 {
 		fmt.Printf("No new data needed for %s (from: %s, to: %s)\n", symbol, fromDate, toDate)
 		return nil
 	}
 
-	fmt.Printf("Fetching data for %s in %d ranges: %d existing records\n", symbol, len(neededRanges), len(existingData))
+	fmt.Printf("\tFetching data for %s in %d ranges: %d existing records\n", symbol, len(neededRanges), len(existingData))
 
 	// Fetch data for each needed range (from newest to oldest)
 	rateLimiter := &rateLimiter{}
@@ -281,86 +254,45 @@ func (s *HistoricalService) FetchAndStoreDailyDataWithHeuristics(symbol, fromDat
 
 	for i, dateRange := range neededRanges {
 		if reachedEndOfData {
-			fmt.Printf("Skipping remaining ranges for %s (reached end of historical data)\n", symbol)
+			fmt.Printf("\tSkipping remaining ranges for %s (reached end of historical data)\n", symbol)
 			break
 		}
 
 		rateLimiter.wait()
 		
-		fmt.Printf("Range %d/%d: %s to %s\n", i+1, len(neededRanges), 
+		fmt.Printf("\tRange %d/%d: %s to %s\n", i+1, len(neededRanges), 
 			formatDate(dateRange.start), formatDate(dateRange.end))
 		
-		// Split range into chunks
-		chunks, err := splitDateRange(formatDate(dateRange.start), formatDate(dateRange.end), "daily")
-		if err != nil {
-			return fmt.Errorf("failed to split date range: %w", err)
+		rateLimiter.wait()
+		
+		// Fetch data from KIS API with retry logic for rate limiting
+		var dailyData data.SlicePriceStruct
+		maxRetries := 3
+		
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			dailyData, err = s.kisClient.GetDailyStockData(symbol, formatDate(dateRange.start), formatDate(dateRange.end))
+			if err == nil {
+				break // Success, exit retry loop
+			}
+			
+			if isRateLimitError(err) {
+				fmt.Printf("\tRate limit error in range %d/%d: %v\n", i+1, len(neededRanges), err)
+				if attempt < maxRetries-1 {
+					handleRateLimitError(err, attempt)
+					continue // Retry
+				}
+			}
+			
+			// Non-rate-limit error or max retries reached
+			return fmt.Errorf("failed to fetch daily data for %s (%s-%s): %w", symbol, formatDate(dateRange.start), formatDate(dateRange.end), err)
 		}
 
-		// Fetch data for each chunk
-		for j, chunk := range chunks {
-			rateLimiter.wait()
-			
-			fmt.Printf("  Chunk %d/%d: %s to %s\n", j+1, len(chunks), chunk[0], chunk[1])
-			
-			// Fetch data from KIS API with retry logic for rate limiting
-			var dailyData data.SlicePriceStruct
-			maxRetries := 3
-			
-			for attempt := 0; attempt < maxRetries; attempt++ {
-				dailyData, err = s.kisClient.GetDailyStockData(symbol, chunk[0], chunk[1])
-				if err == nil {
-					break // Success, exit retry loop
-				}
-				
-				if isRateLimitError(err) {
-					fmt.Printf("Rate limit error in chunk %d/%d: %v\n", j+1, len(chunks), err)
-					if attempt < maxRetries-1 {
-						handleRateLimitError(err, attempt)
-						continue // Retry
-					}
-				}
-				
-				// Non-rate-limit error or max retries reached
-				return fmt.Errorf("failed to fetch daily data for %s (%s-%s): %w", symbol, chunk[0], chunk[1], err)
-			}
+		allNewData = append(allNewData, dailyData...)
+		fmt.Printf("\t\tReceived %d daily records for range %d\n", len(dailyData), i+1)
 
-			allNewData = append(allNewData, dailyData...)
-			fmt.Printf("  Received %d daily records for chunk %d\n", len(dailyData), j+1)
-
-			// If the chunk returned 0 records, check if this is likely the end of historical data
-			if len(dailyData) == 0 {
-				// Check if this chunk is in the past (not future dates)
-				chunkFrom, _ := parseDate(chunk[0])
-				chunkTo, _ := parseDate(chunk[1])
-				now := time.Now()
-				
-				// Calculate the size of this chunk
-				chunkDays := int(chunkTo.Sub(chunkFrom).Hours() / 24)
-				
-				// If the chunk is in the past and returns 0 records, we need to be more careful
-				if chunkFrom.Before(now) && chunkTo.Before(now) {
-					// Only terminate if the chunk is large enough (at least 7 days) and still returns 0
-					// Small chunks might just not contain trading days
-					if chunkDays >= 7 {
-						fmt.Printf("Chunk %d/%d returned 0 records for past dates (%s-%s, %d days), reached end of historical data for %s\n", 
-							j+1, len(chunks), chunk[0], chunk[1], chunkDays, symbol)
-						reachedEndOfData = true
-						break // Exit the chunk loop for this date range
-					} else {
-						fmt.Printf("Chunk %d/%d returned 0 records for small past range (%s-%s, %d days), might be no trading days, continuing\n", 
-							j+1, len(chunks), chunk[0], chunk[1], chunkDays)
-						// Don't terminate for small chunks, they might just not contain trading days
-					}
-				} else if chunkFrom.After(now) || chunkTo.After(now) {
-					fmt.Printf("Chunk %d/%d returned 0 records for future dates (%s-%s), skipping\n", 
-						j+1, len(chunks), chunk[0], chunk[1])
-					// Don't set reachedEndOfData for future dates, just continue
-				} else {
-					// This is today's date or very recent, 0 records might be normal
-					fmt.Printf("Chunk %d/%d returned 0 records for recent dates (%s-%s), continuing\n", 
-						j+1, len(chunks), chunk[0], chunk[1])
-				}
-			}
+		// If the chunk returned 0 records, check if this is likely the end of historical data
+		if len(dailyData) == 0 {
+			reachedEndOfData = true
 		}
 	}
 
@@ -375,7 +307,7 @@ func (s *HistoricalService) FetchAndStoreDailyDataWithHeuristics(symbol, fromDat
 		return fmt.Errorf("failed to store daily data for %s: %w", symbol, err)
 	}
 
-	fmt.Printf("Successfully stored %d new daily records for %s\n", len(allNewData), symbol)
+	// fmt.Printf("Successfully stored %d new daily records for %s\n", len(allNewData), symbol)
 	return nil
 }
 
@@ -404,22 +336,6 @@ func (s *HistoricalService) determineNeededDateRanges(existingData data.SlicePri
 		fmt.Printf("Adjusted date range is invalid (%s to %s), returning empty ranges\n", formatDate(from), formatDate(to))
 		return []dateRange{}
 	}
-	
-	if len(existingData) == 0 {
-		// No existing data, fetch the entire range (newest to oldest)
-		// But don't fetch if the range is too small (less than 1 day)
-		daysDiff := int(to.Sub(from).Hours() / 24)
-		if daysDiff < 1 {
-			fmt.Printf("Date range is too small (%d days), skipping\n", daysDiff)
-			return []dateRange{}
-		}
-		return []dateRange{{start: from, end: to}}
-	}
-
-	// Sort existing data by date
-	sort.Slice(existingData, func(i, j int) bool {
-		return existingData[i].Date < existingData[j].Date
-	})
 
 	// Create a map of existing dates for quick lookup
 	existingDates := make(map[string]bool)
@@ -428,46 +344,61 @@ func (s *HistoricalService) determineNeededDateRanges(existingData data.SlicePri
 	}
 
 	var neededRanges []dateRange
+	var start time.Time
+	var end time.Time
 	current := from
 
-	// Scan through the date range and identify gaps
+	// Parse through all dates from "from" to "to"
 	for current.Before(to) || current.Equal(to) {
-		// Find the next gap
-		gapStart := current
+		currentDateStr := formatDate(current)
 		
-		// Find where the gap ends (where we have data again)
-		for current.Before(to) || current.Equal(to) {
-			currentDateStr := formatDate(current)
-			if existingDates[currentDateStr] {
-				break // We have data for this date
-			}
-			current = current.AddDate(0, 0, 1)
-		}
-		
-		// If we found a gap, add it to needed ranges
-		if gapStart.Before(current) {
-			gapEnd := current.AddDate(0, 0, -1) // Back up one day since current is the first date with data
-			daysDiff := int(gapEnd.Sub(gapStart).Hours() / 24)
-			
-			// Only add gaps that are at least 3 days long to ensure they might contain trading days
-			if daysDiff >= 3 {
-				neededRanges = append(neededRanges, dateRange{
-					start: gapStart,
-					end:   gapEnd,
-				})
-			} else {
-				fmt.Printf("Skipping small gap: %s to %s (%d days) - too small to contain trading days\n", formatDate(gapStart), formatDate(gapEnd), daysDiff)
-			}
-		}
-		
-		// Skip over existing data
-		for current.Before(to) || current.Equal(to) {
-			currentDateStr := formatDate(current)
+		// Check if current date is a trading day
+		if data.IsTradingDay(currentDateStr) {
+			// If it's a trading day, check if we have data for it
 			if !existingDates[currentDateStr] {
-				break // Found next gap
+				// We don't have data for this trading day
+				if start.IsZero() {
+					start = current
+				} else {
+					// If "start" is not empty, check if current is within 100 trading days of "start"
+					// Calculate trading days between start and current (inclusive)
+					startDateStr := formatDate(start)
+					tradingDaysCount := data.CountInRange(startDateStr, currentDateStr)
+					
+					if tradingDaysCount <= 100 {
+						// Current is within 100 trading days of start, set end = current
+						end = current
+					} else {
+						// Current is not within 100 trading days of start
+						// Push start and end as a range, then clear and set start = current
+						if !end.IsZero() {
+							neededRanges = append(neededRanges, dateRange{
+								start: start,
+								end:   end,
+							})
+						}
+						start = current
+						end = time.Time{}
+					}
+				}
 			}
-			current = current.AddDate(0, 0, 1)
 		}
+		
+		current = current.AddDate(0, 0, 1)
+	}
+	
+	// Don't forget to add the last range if we have one
+	if !start.IsZero() && !end.IsZero() {
+		neededRanges = append(neededRanges, dateRange{
+			start: start,
+			end:   end,
+		})
+	} else if !start.IsZero() {
+		// If we have a start but no end, use the start date as both start and end
+		neededRanges = append(neededRanges, dateRange{
+			start: start,
+			end:   start,
+		})
 	}
 
 	// Reverse the order to fetch from newest to oldest
@@ -622,14 +553,9 @@ func (s *HistoricalService) CheckDataCompleteness(symbol, fromDate, toDate strin
 		}
 	}
 
-	// Calculate expected number of trading days (roughly 252 per year)
-	daysDiff := int(to.Sub(from).Hours() / 24)
-	expectedTradingDays := int(float64(daysDiff) * 0.7) // Rough estimate: 70% of calendar days are trading days
-
-	// Consider data complete if we have at least 80% of expected trading days
-	isComplete := count >= int(float64(expectedTradingDays)*0.8)
-	
-	return isComplete, count, nil
+	// Calculate the number of trading days
+	tradingDays := data.CountInRange(fromDate, toDate)
+	return tradingDays == count, count, nil
 }
 
 // BulkFetchDailyData fetches daily data for multiple symbols
